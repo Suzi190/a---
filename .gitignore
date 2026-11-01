@@ -1,0 +1,17 @@
+# Android / Gradle 构建产物与缓存（不要提交，否则仓库会暴涨）
+Poemnarapk-main/.gradle/
+Poemnarapk-main/build/
+Poemnarapk-main/app/build/
+Poemnarapk-main/out/
+
+# 本机环境配置（内含本机 SDK 路径，禁止提交）
+Poemnarapk-main/local.properties
+
+# IDE / 系统垃圾文件
+*.iml
+.idea/
+.DS_Store
+Thumbs.db
+
+# 编辑器/工作区配置
+.vscode/
