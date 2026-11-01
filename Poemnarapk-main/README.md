@@ -182,8 +182,8 @@ gradle assembleRelease
 | 能力 | 实现位置 | 说明 |
 | --- | --- | --- |
 | 应用名 | `res/values/strings.xml` | 桌面图标名 = **叙事诗** |
-| 全屏无灰顶栏 | `MainActivity.setupFullscreenWindow()` + `applyImmersiveMode()` + `res/values/styles.xml` | 隐藏状态栏与导航栏，窗口底色纯白；`systemBarsBehavior` 为“滑动临时呼出”，不会长期占用顶部 |
-| 输入框不被键盘遮挡 | Manifest `windowSoftInputMode="adjustResize"` + `WindowCompat.setDecorFitsSystemWindows(window, true)` + `interactive-widget=resizes-content` | 键盘弹出时 WebView 真实变矮，输入框随之上移；`app_native_bridge.js` 还会兜底把聚焦输入框滚进可视区 |
+| 全屏无灰顶栏 | `MainActivity.setupFullscreenWindow()` + `applyImmersiveMode()` + `res/values/styles.xml` | 状态栏与导航栏全隐藏、系统栏颜色透明、窗口底色纯黑（不会在刘海条处透出白色）；`systemBarsBehavior` 为“滑动临时呼出”，划出后 `installInsetsGuard()` 会自动再收起 |
+| 输入框不被键盘遮挡 | Manifest `windowSoftInputMode="adjustResize"` + `WindowCompat.setDecorFitsSystemWindows(window, true)` | 键盘弹出时 WebView 真实变矮，输入框与底栏随之上移；**不再**使用 `interactive-widget=resizes-content`（与 adjustResize 叠加会把视口压两次，导致整页被顶飞、中间出现大白框） |
 | 边缘滑动返回 | `MainActivity.dispatchTouchEvent()` → `handleBackRequest(true)` | 左边缘右划 / 右边缘左划（贴边 28dp 内起手、水平位移 ≥72dp）触发返回；先回上一页，回不去则静默忽略，**绝不退出 APK**（只有物理返回键才走“再返回一次退出”），所以桌面左右翻页不会误退 |
 | 返回键不误退 | 同 `handleBackRequest()` | 网页侧 `window.__storyNativeBack()` 按「浮层 → 设置二级 → 应用窗口」逐级回退，全部关完才轮到退出确认 |
 | 数据导入导出 | `assets/app_settings.js` + `AndroidMcp.openExportStream()` | 导出统一落到 `Download/Storypoem/`；Android 10+ 走 MediaStore（无需“所有文件访问”权限），Android 9 及以下直写公共下载目录；导入走 HTML5 `<input type="file">`，壳层已做 `createIntent()` 兜底 |
@@ -192,6 +192,18 @@ gradle assembleRelease
 | 键盘不顶飞页面 | Manifest `adjustResize` + `installInsetsGuard()` + `app_native_bridge.js` 视口守卫 | 键盘弹出时 WebView 真实变矮 → 底栏随键盘上移；键盘收起后壳层主动 `requestLayout()` 并把文档级滚动量归零、桌面滚动位置还原，不会再出现「整页上移且退不回来」；页面里已移除 `interactive-widget` 与 `scrollIntoView` 补丁，避免二次补偿 |
 
 > 网页侧新增的 `app_native_bridge.js` 只依赖壳层暴露的 `AndroidMCP`，在浏览器/PWA 下运行时会退化为 Web Notification 与普通页面返回，不影响网页版。
+
+### 5.5 APK 体积（约 27 MB）
+
+| 手段 | 位置 | 效果 |
+| --- | --- | --- |
+| 只打包两种 ABI | `app/build.gradle.kts` 的 `ndk.abiFilters` | 去掉 x86 / x86_64 模拟器库，真机只留 `arm64-v8a` + `armeabi-v7a` |
+| 原生库二次压缩 | `app/build.gradle.kts` 的 `packaging.jniLibs.useLegacyPackaging = true`（等价于 `extractNativeLibs=true`） | libwebp 等 so 从「存储」改为「压缩」入包 |
+| 图片重编码 | `assets/images/*` 统一 JPEG q86 重采样（长边 ≤1440） | 情侣空间/壁纸/组件照片从 ~20 MB 降到 ~2 MB，画质肉眼无差 |
+| 代码与资源压缩 | `isMinifyEnabled` + `isShrinkResources` + 自定义 `proguard-rules.pro` | R8 混淆并裁掉未引用的资源 |
+| 构建脚本搬移 | `start-ncm-api.js` 从 `assets/` 移到 `tools/` | 调试脚本不再打进安装包 |
+
+> 需要为模拟器出包时，把 `abiFilters` 临时改成 `"arm64-v8a", "armeabi-v7a", "x86_64"` 即可。
 
 ---
 
