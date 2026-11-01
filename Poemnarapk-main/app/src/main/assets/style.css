@@ -82,6 +82,11 @@ html.story-native-shell .win-footer.chat-tabs {
   padding-bottom: 0 !important;
 }
 
+/* 桌面 Dock：原生壳里导航栏已隐藏，只保留设计本身的 20px 视觉留白，不再叠安全区 */
+html.story-native-shell #dock {
+  padding-bottom: 20px !important;
+}
+
 #desktop {
   flex: 1;
   padding: 30px 20px 20px 20px;
