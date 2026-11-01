@@ -49,6 +49,39 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* ============================================================
+   原生壳（APK）全屏修正 —— html.story-native-shell 由 app_native_bridge.js 注入
+   ------------------------------------------------------------
+   APK 壳已把状态栏 / 导航栏彻底隐藏，此时 env(safe-area-inset-*) 仍会返回
+   刘海与导航条的高度，导致：
+     · #phone-container 顶部多出一条浅色留白 → 「顶部白条」
+     · #app-window-container 被 top/bottom 顶起 → 应用底栏整体上移
+     · .win-footer.chat-tabs 被 padding-bottom 顶高 → 聊天底栏上移
+   高度统一改用 100%（跟随 WebView 真实视口），不用 100vh，
+   键盘收起后不会被残留的 vh 值卡住。
+   ============================================================ */
+html.story-native-shell,
+html.story-native-shell body {
+  height: 100% !important;
+  width: 100% !important;
+}
+
+html.story-native-shell #phone-container {
+  height: 100% !important;
+  width: 100% !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+html.story-native-shell #app-window-container {
+  top: 0 !important;
+  bottom: 0 !important;
+}
+
+html.story-native-shell .win-footer.chat-tabs {
+  padding-bottom: 0 !important;
+}
+
 #desktop {
   flex: 1;
   padding: 30px 20px 20px 20px;

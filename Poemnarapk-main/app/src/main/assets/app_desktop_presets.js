@@ -488,7 +488,7 @@ window.DESKTOP_PRESETS = {
   background: rgba(255, 255, 255, 0.66) !important;
   border: 1px solid rgba(255, 255, 255, 0.92) !important;
   border-radius: 50% !important;
-  box-shadow: 0 6px 16px rgba(120, 160, 200, 0.16), inset 0 1px 1px rgba(255, 255, 255, 0.92) !important;
+  box-shadow: 0 6px 16px rgba(122, 126, 132, 0.16), inset 0 1px 1px rgba(255, 255, 255, 0.92) !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
   overflow: hidden !important;
@@ -531,7 +531,7 @@ window.DESKTOP_PRESETS = {
   font-size: 11px !important;
   font-weight: 600 !important;
   letter-spacing: 0.4px !important;
-  color: #46607a !important;
+  color: #5f6469 !important;
   text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9) !important;
 }
 
@@ -542,21 +542,21 @@ window.DESKTOP_PRESETS = {
   -webkit-backdrop-filter: blur(26px) saturate(180%) !important;
   border: 1.5px solid rgba(255, 255, 255, 0.85) !important;
   border-radius: 34px !important;
-  box-shadow: 0 16px 36px rgba(120, 160, 200, 0.22), inset 0 1px 2px rgba(255, 255, 255, 0.9) !important;
+  box-shadow: 0 16px 36px rgba(122, 126, 132, 0.20), inset 0 1px 2px rgba(255, 255, 255, 0.9) !important;
 }
 .dock-container .icon-wrapper {
   background: rgba(255, 255, 255, 0.66) !important;
   border: 1px solid rgba(255, 255, 255, 0.9) !important;
   border-radius: 50% !important;
-  box-shadow: 0 4px 12px rgba(120, 160, 200, 0.16) !important;
+  box-shadow: 0 4px 12px rgba(122, 126, 132, 0.16) !important;
 }
 
 /* 翻页指示器 */
 #desktop-page-indicator .page-dot {
-  background-color: rgba(120, 160, 200, 0.32) !important;
+  background-color: rgba(138, 142, 148, 0.38) !important;
 }
 #desktop-page-indicator .page-dot.active {
-  background-color: rgba(90, 130, 165, 0.85) !important;
+  background-color: rgba(96, 100, 106, 0.85) !important;
 }
 `,
     widgets: {
@@ -575,16 +575,16 @@ window.DESKTOP_PRESETS = {
   border-radius: 50%; font-weight: 500;
 }
 #bg-hero .bg-day.is-today > b {
-  background: rgba(92, 138, 178, 0.9);
+  background: rgba(96, 96, 96, 0.92);
   color: #ffffff;
   font-weight: 700;
-  box-shadow: 0 2px 6px rgba(92, 138, 178, 0.4);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
 }
-/* 顶部条 / 照片卡 / 日历卡：统一玻璃白卡质感 */
+/* 顶部条 / 照片卡 / 日历卡：统一无色磨砂白卡质感 */
 #bg-hero #bg-topbar, #bg-hero #bg-photo, #bg-hero #bg-cal {
-  background: rgba(255, 255, 255, 0.52);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  box-shadow: 0 6px 18px rgba(120, 160, 200, 0.14);
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.86);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
 }
 /* 中部两卡：占位层撑出高度，内层绝对定位放两张等宽卡片（左右各一） */
 #bg-hero #bg-mid { width: 100%; position: relative; }
@@ -604,9 +604,9 @@ window.DESKTOP_PRESETS = {
   flex: 0 0 auto;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1.5px solid rgba(255, 255, 255, 0.92);
-  box-shadow: 0 4px 12px rgba(120, 160, 200, 0.2);
+  background: rgba(255, 255, 255, 0.66);
+  border: 1.5px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   transition: transform .16s ease;
 }
 #bg-hero .bg-orb:active { transform: scale(0.94); }
@@ -614,7 +614,7 @@ window.DESKTOP_PRESETS = {
   position: absolute; inset: 0;
   width: 100%; height: 100%; object-fit: cover; display: block;
 }
-#bg-hero #bg-quote:empty::before { content: "写一句想说的话"; color: rgba(120, 145, 170, 0.5); }
+#bg-hero #bg-quote:empty::before { content: "写一句想说的话"; color: rgba(150, 150, 150, 0.62); }
 @media (max-height: 700px) {
   #bg-hero { padding: 8px !important; }
   #bg-hero #bg-topbar { padding: 10px 12px !important; }
@@ -652,34 +652,34 @@ window.DESKTOP_PRESETS = {
   #bg-hero #bg-cal-grid { font-size: 7px !important; }
 }
 </style>
-<div id="bg-hero" style="width:100%; height:100%; box-sizing:border-box; padding:12px 12px 12px 12px; display:flex; flex-direction:column; justify-content:space-between; gap:8px; border-radius:22px; background:linear-gradient(158deg, rgba(255,255,255,0.46) 0%, rgba(255,255,255,0.26) 46%, rgba(206,232,255,0.32) 100%); backdrop-filter:blur(24px) saturate(170%); -webkit-backdrop-filter:blur(24px) saturate(170%); border:1px solid rgba(255,255,255,0.6); box-shadow:0 18px 40px rgba(120,160,200,0.18), inset 0 1px 1px rgba(255,255,255,0.65); overflow:hidden; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; user-select:none; -webkit-user-select:none;">
+<div id="bg-hero" style="width:100%; height:100%; box-sizing:border-box; padding:12px 12px 12px 12px; display:flex; flex-direction:column; justify-content:space-between; gap:8px; border-radius:22px; background:linear-gradient(158deg, rgba(255,255,255,0.64) 0%, rgba(255,255,255,0.44) 52%, rgba(255,255,255,0.34) 100%); backdrop-filter:blur(26px) saturate(8%); -webkit-backdrop-filter:blur(26px) saturate(8%); border:1px solid rgba(255,255,255,0.74); box-shadow:0 18px 40px rgba(0,0,0,0.10), inset 0 1px 1px rgba(255,255,255,0.85); overflow:hidden; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; user-select:none; -webkit-user-select:none;">
   <!-- 顶部条：头像 + 大号时间（白色玻璃横条） -->
   <div id="bg-topbar" style="flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:16px 16px; border-radius:18px;">
     <input type="file" id="bg-avatar-input" accept="image/*" style="display:none;">
-    <div id="bg-avatar" title="点击更换头像" style="width:clamp(38px,12.8vw,50px); height:clamp(38px,12.8vw,50px); flex:0 0 auto; border-radius:50%; overflow:hidden; background:rgba(255,255,255,0.9); border:1.5px solid rgba(255,255,255,0.95); box-shadow:0 4px 12px rgba(120,160,200,0.22); display:flex; align-items:center; justify-content:center; cursor:pointer;">
+    <div id="bg-avatar" title="点击更换头像" style="width:clamp(38px,12.8vw,50px); height:clamp(38px,12.8vw,50px); flex:0 0 auto; border-radius:50%; overflow:hidden; background:rgba(255,255,255,0.92); border:1.5px solid rgba(255,255,255,0.96); box-shadow:0 4px 12px rgba(0,0,0,0.1); display:flex; align-items:center; justify-content:center; cursor:pointer;">
       <img id="bg-avatar-img" alt="" style="display:none; width:100%; height:100%; object-fit:cover;">
       <svg id="bg-avatar-svg" viewBox="0 0 64 64" style="width:82%; height:82%; display:block;">
         <defs>
           <linearGradient id="bg-av-cap" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#cfe7ff"/>
-            <stop offset="1" stop-color="#9cc9ef"/>
+            <stop offset="0" stop-color="#e4e7ea"/>
+            <stop offset="1" stop-color="#b9bec4"/>
           </linearGradient>
         </defs>
-        <circle cx="32" cy="8" r="4.2" fill="#eaf6ff" stroke="#dbeefc" stroke-width="0.8"/>
+        <circle cx="32" cy="8" r="4.2" fill="#eef0f2" stroke="#e0e3e6" stroke-width="0.8"/>
         <path d="M14 26c0-9 8-15 18-15s18 6 18 15z" fill="url(#bg-av-cap)"/>
-        <rect x="8" y="25" width="48" height="6.5" rx="3.2" fill="#f2f9ff"/>
+        <rect x="8" y="25" width="48" height="6.5" rx="3.2" fill="#f4f5f6"/>
         <ellipse cx="32" cy="45" rx="16" ry="14" fill="#ffffff"/>
         <path d="M18 37l1.5-7 6.5 4.5z" fill="#ffffff"/>
         <path d="M46 37l-1.5-7-6.5 4.5z" fill="#ffffff"/>
-        <circle cx="26" cy="44" r="2.3" fill="#5b7f9e"/>
-        <circle cx="38" cy="44" r="2.3" fill="#5b7f9e"/>
-        <ellipse cx="20.5" cy="49" rx="3" ry="1.9" fill="#ffd7e0" opacity="0.9"/>
-        <ellipse cx="43.5" cy="49" rx="3" ry="1.9" fill="#ffd7e0" opacity="0.9"/>
-        <path d="M32 47.5v2.5" stroke="#a9c2d6" stroke-width="1.3" stroke-linecap="round"/>
-        <path d="M28.5 50.5c1.6 2.2 5.4 2.2 7 0" stroke="#a9c2d6" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+        <circle cx="26" cy="44" r="2.3" fill="#60656b"/>
+        <circle cx="38" cy="44" r="2.3" fill="#60656b"/>
+        <ellipse cx="20.5" cy="49" rx="3" ry="1.9" fill="#e6e8ea" opacity="0.95"/>
+        <ellipse cx="43.5" cy="49" rx="3" ry="1.9" fill="#e6e8ea" opacity="0.95"/>
+        <path d="M32 47.5v2.5" stroke="#aeb3b9" stroke-width="1.3" stroke-linecap="round"/>
+        <path d="M28.5 50.5c1.6 2.2 5.4 2.2 7 0" stroke="#aeb3b9" stroke-width="1.3" fill="none" stroke-linecap="round"/>
       </svg>
     </div>
-    <div id="bg-time" style="font-size:clamp(26px,9vw,38px); font-weight:400; letter-spacing:1.5px; line-height:1; color:rgba(88,113,139,0.86); font-variant-numeric:tabular-nums; font-feature-settings:'tnum';">12:55</div>
+    <div id="bg-time" style="font-size:clamp(26px,9vw,38px); font-weight:400; letter-spacing:1.5px; line-height:1; color:rgba(74,74,74,0.9); font-variant-numeric:tabular-nums; font-feature-settings:'tnum';">12:55</div>
   </div>
 
   <!-- 中部：照片卡 2×3 + 日历卡 2×3（padding-top 撑出竖版比例，兼容老 WebView） -->
@@ -687,14 +687,14 @@ window.DESKTOP_PRESETS = {
     <div class="bg-mid-spacer" aria-hidden="true"></div>
     <div id="bg-mid-grid">
       <input type="file" id="bg-photo-input" accept="image/*" style="display:none;">
-      <div id="bg-photo" title="点击更换照片" style="min-width:0; min-height:0; border-radius:16px; overflow:hidden; background-color:#e8f3ff; background-size:cover; background-position:center; background-repeat:no-repeat; cursor:pointer;"></div>
+      <div id="bg-photo" title="点击更换照片" style="min-width:0; min-height:0; border-radius:16px; overflow:hidden; background-color:#ededed; background-size:cover; background-position:center; background-repeat:no-repeat; cursor:pointer;"></div>
       <div id="bg-cal" style="min-width:0; min-height:0; border-radius:16px; padding:7px 8px 6px 8px; display:flex; flex-direction:column; overflow:hidden;">
         <div style="flex:0 0 auto; display:flex; align-items:baseline; justify-content:space-between; padding:0 2px 4px 2px;">
-          <div id="bg-cal-month" style="font-size:clamp(12px,3.6vw,16px); font-weight:700; color:rgba(62,88,114,0.88);">10 月</div>
-          <div id="bg-cal-year" style="font-size:clamp(9px,2.6vw,12px); font-weight:600; color:rgba(96,122,148,0.72);">2026</div>
+          <div id="bg-cal-month" style="font-size:clamp(12px,3.6vw,16px); font-weight:700; color:rgba(58,58,58,0.92);">10 月</div>
+          <div id="bg-cal-year" style="font-size:clamp(9px,2.6vw,12px); font-weight:600; color:rgba(118,118,118,0.8);">2026</div>
         </div>
-        <div id="bg-cal-week" style="flex:0 0 auto; display:grid; grid-template-columns:repeat(7,1fr); padding:0 1px; font-size:clamp(8px,2.4vw,10px); color:rgba(120,145,170,0.85);"></div>
-        <div id="bg-cal-grid" style="flex:1 1 auto; min-height:0; display:grid; grid-template-columns:repeat(7,1fr); grid-auto-rows:1fr; gap:1px; padding:0 1px; font-size:clamp(8px,2.6vw,11px); color:rgba(84,110,136,0.9);"></div>
+        <div id="bg-cal-week" style="flex:0 0 auto; display:grid; grid-template-columns:repeat(7,1fr); padding:0 1px; font-size:clamp(8px,2.4vw,10px); color:rgba(128,128,128,0.88);"></div>
+        <div id="bg-cal-grid" style="flex:1 1 auto; min-height:0; display:grid; grid-template-columns:repeat(7,1fr); grid-auto-rows:1fr; gap:1px; padding:0 1px; font-size:clamp(8px,2.6vw,11px); color:rgba(84,84,84,0.92);"></div>
       </div>
     </div>
   </div>
@@ -704,7 +704,7 @@ window.DESKTOP_PRESETS = {
   <div id="bg-dots" style="flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 2px;">
     <div class="bg-orb" data-orb="0" title="点击更换图片">
       <img class="bg-orb-img" alt="" style="display:none;">
-      <svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="#6f97bd" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="#8a8a8a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
         <path d="M5 8h11v4.5a5.5 5.5 0 0 1-11 0z"/>
         <path d="M16 9h1.8a2.2 2.2 0 0 1 0 4.4H16"/>
         <path d="M8 5.5c0-1 1-1.3 1-2.2M11 5.5c0-1 1-1.3 1-2.2"/>
@@ -712,32 +712,32 @@ window.DESKTOP_PRESETS = {
     </div>
     <div class="bg-orb" data-orb="1" title="点击更换图片">
       <img class="bg-orb-img" alt="" style="display:none;">
-      <svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="#6f97bd" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="#8a8a8a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/>
         <path d="M12 6.2l-2-2M12 6.2l2-2M12 17.8l-2 2M12 17.8l2 2"/>
       </svg>
     </div>
     <div class="bg-orb" data-orb="2" title="点击更换图片">
       <img class="bg-orb-img" alt="" style="display:none;">
-      <svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="#6f97bd" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="#8a8a8a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
         <path d="M7.5 4h9l3 5.5-7.5 10.5L4.5 9.5z"/>
         <path d="M4.5 9.5h15M12 4l-3 5.5 3 10.5 3-10.5L12 4z"/>
       </svg>
     </div>
     <div class="bg-orb" data-orb="3" title="点击更换图片">
       <img class="bg-orb-img" alt="" style="display:none;">
-      <svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="#6f97bd" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="#8a8a8a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
         <path d="M9 11c0-4 1-6.5 2.2-6.5S13.4 7 13.4 11"/>
         <path d="M15.4 11c-.4-3 .2-5.5 1.4-5.5s1.8 2 1 5"/>
         <circle cx="12" cy="16" r="5"/>
         <path d="M12 17.5v1M10.6 19c.6.7 2.2.7 2.8 0"/>
-        <circle cx="10.2" cy="15" r="0.7" fill="#6f97bd" stroke="none"/>
-        <circle cx="13.8" cy="15" r="0.7" fill="#6f97bd" stroke="none"/>
+        <circle cx="10.2" cy="15" r="0.7" fill="#8a8a8a" stroke="none"/>
+        <circle cx="13.8" cy="15" r="0.7" fill="#8a8a8a" stroke="none"/>
       </svg>
     </div>
     <div class="bg-orb" data-orb="4" title="点击更换图片">
       <img class="bg-orb-img" alt="" style="display:none;">
-      <svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="#6f97bd" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="#8a8a8a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
         <rect x="4.5" y="10.5" width="15" height="9.5" rx="1.6"/>
         <path d="M3.5 10.5h17v3.2h-17zM12 10.5v9.5"/>
         <path d="M12 10.5c-3.4 0-4.8-1-4.8-2.6S9.6 6.2 12 10.5zM12 10.5c3.4 0 4.8-1 4.8-2.6S14.4 6.2 12 10.5z"/>
@@ -746,7 +746,7 @@ window.DESKTOP_PRESETS = {
   </div>
 
   <!-- 底部：可编辑的一句话 -->
-  <div id="bg-quote" contenteditable="true" spellcheck="false" style="flex:0 0 auto; text-align:center; font-size:clamp(15px,5vw,21px); letter-spacing:2px; line-height:1.5; padding:0 0 2px; color:rgba(94,124,152,0.8); outline:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:text;">나는 너를 좋아해</div>
+  <div id="bg-quote" contenteditable="true" spellcheck="false" style="flex:0 0 auto; text-align:center; font-size:clamp(15px,5vw,21px); letter-spacing:2px; line-height:1.5; padding:0 0 2px; color:rgba(90,90,90,0.86); outline:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:text;">나는 너를 좋아해</div>
 </div>
 <script>
 (function () {
@@ -795,7 +795,7 @@ window.DESKTOP_PRESETS = {
     weekEl.innerHTML = '';
     WEEK_LABEL.forEach(function (label) {
       var cell = document.createElement('div');
-      cell.style.cssText = 'text-align:center; font-size:clamp(8px,2.4vw,10px); color:rgba(120,145,170,0.85);';
+      cell.style.cssText = 'text-align:center; font-size:clamp(8px,2.4vw,10px); color:rgba(128,128,128,0.88);';
       cell.textContent = label;
       weekEl.appendChild(cell);
     });
@@ -1130,7 +1130,7 @@ window.ensureDefaultDesktopTheme = function() {
 // 用户自己在设置里写的自定义 CSS 不含预设签名，不会被误伤。
 // ⚠️ 以后每次修改内置主题样式，都要把 BUILTIN_PRESET_CSS_VERSION +1。
 // ============================================================
-const BUILTIN_PRESET_CSS_VERSION = 2;
+const BUILTIN_PRESET_CSS_VERSION = 3;
 const BUILTIN_PRESET_CSS_VERSION_KEY = "beautify-builtin-css-version";
 
 window.syncBuiltinPresetCss = function() {
@@ -1179,7 +1179,7 @@ window.syncBuiltinPresetCss = function() {
 // 用户从零重写的组件不含该标记 → 原样保留，非内置组件（自定义 id）完全不受影响。
 // ⚠️ 以后每次调整内置组件的尺寸或 html，都要把 BUILTIN_PRESET_WIDGET_VERSION +1。
 // ============================================================
-const BUILTIN_PRESET_WIDGET_VERSION = 2;
+const BUILTIN_PRESET_WIDGET_VERSION = 4;
 const BUILTIN_PRESET_WIDGET_VERSION_KEY = "beautify-builtin-widget-version";
 
 // 取内置 html 里第一个 id="xxx" 作为「这是内置原版」的指纹

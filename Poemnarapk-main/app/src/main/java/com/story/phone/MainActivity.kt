@@ -15,6 +15,7 @@ import android.content.res.Resources
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.IBinder
 import android.webkit.GeolocationPermissions
 import android.webkit.ValueCallback
@@ -22,11 +23,23 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.story.phone.R
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
@@ -36,24 +49,51 @@ class MainActivity : AppCompatActivity() {
     private val FILE_CHOOSER_RESULT_CODE = 101
     private val PERMISSIONS_REQUEST_CODE = 102
 
+    // ===== 返回逻辑状态（手势边缘返回 / 物理返回键共用） =====
+    private var exitArmedAt = 0L // 上一次“再按一次退出”的时间戳
+    private var swipeTracking = false // 本次触摸是否从屏幕左右边缘起手
+    private var swipeStartX = 0f
+    private var swipeStartY = 0f
+    private var swipeStartAt = 0L
+
+    // 边缘起手判定区 & 触发距离（dp → px）
+    private val edgeZonePx: Float by lazy { 28f * resources.displayMetrics.density }
+    private val edgeDistancePx: Float by lazy { 72f * resources.displayMetrics.density }
+    /** 上一帧输入法是否可见：用于在键盘收起时补一次 WebView relayout */
+    private var imeWasVisible = false
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // ① 全屏沉浸：隐藏状态栏与导航栏，并保持 adjustResize（键盘弹出时真实缩小可用高度）
+        setupFullscreenWindow()
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webview)
+        // ② 去掉 WebView 默认灰底与拖动时的边缘泛光，避免顶部/底部出现灰色条带
+        webView.setBackgroundColor(Color.WHITE)
+        webView.overScrollMode = View.OVER_SCROLL_NEVER
+        // ③ 系统栏 / 键盘守卫：状态栏被顶回来就再隐藏；键盘收起时补一次 relayout
+        installInsetsGuard()
+
         
         webView.webViewClient = object : WebViewClient() {
             @Suppress("DEPRECATION")
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                return false 
+                return handleExternalUrl(url)
             }
 
             override fun shouldOverrideUrlLoading(
                 view: WebView?,
                 request: android.webkit.WebResourceRequest?
             ): Boolean {
-                return false 
+                return handleExternalUrl(request?.url?.toString())
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                // 网页 focus / 软键盘可能把系统栏抢回来，页面加载完成后重新锁定全屏
+                applyImmersiveMode()
             }
         }
 
@@ -67,7 +107,7 @@ class MainActivity : AppCompatActivity() {
                 callback?.invoke(origin, true, false)
             }
 
-            // 支持 HTML5 <input type="file"> 文件选择器
+            // 支持 HTML5 <input type="file"> 文件选择器（备份/角色卡导入等全部走这里）
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
@@ -77,16 +117,36 @@ class MainActivity : AppCompatActivity() {
                 (fileUploadCallback as? ValueCallback<Array<Uri>?>)?.onReceiveValue(null)
                 fileUploadCallback = filePathCallback
 
-                // 【修复点】：如果 createIntent 返回 null，直接 return false，彻底解决报错！
-                val intent = fileChooserParams?.createIntent() ?: return false
-                
-                try {
-                    startActivityForResult(intent, FILE_CHOOSER_RESULT_CODE)
-                } catch (e: ActivityNotFoundException) {
-                    fileUploadCallback = null
-                    return false
+                // 首选系统推荐 Intent；部分机型 createIntent() 返回 null，则用 ACTION_GET_CONTENT 兜底
+                var intent = fileChooserParams?.createIntent()
+                if (intent == null) {
+                    intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = resolveAcceptType(fileChooserParams)
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE)
+                    }
                 }
-                return true
+
+                return try {
+                    startActivityForResult(intent, FILE_CHOOSER_RESULT_CODE)
+                    true
+                } catch (e: ActivityNotFoundException) {
+                    // 二级兜底：任意文件
+                    try {
+                        startActivityForResult(
+                            Intent(Intent.ACTION_GET_CONTENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = "*/*"
+                            },
+                            FILE_CHOOSER_RESULT_CODE
+                        )
+                        true
+                    } catch (e2: Exception) {
+                        fileUploadCallback = null
+                        Toast.makeText(this@MainActivity, "当前设备没有可用的文件选择器", Toast.LENGTH_SHORT).show()
+                        false
+                    }
+                }
             }
         }
 
@@ -98,9 +158,34 @@ class MainActivity : AppCompatActivity() {
         settings.databaseEnabled = true
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
+        // 本地 file:// 页面需要访问同源资源（备份/角色卡/图片导入导出依赖）
+        settings.allowFileAccessFromFileURLs = true
+        settings.allowUniversalAccessFromFileURLs = true
+        settings.setGeolocationEnabled(true)
+        settings.javaScriptCanOpenWindowsAutomatically = false
+        settings.setSupportMultipleWindows(false)
         
         // 解锁 AI 在后台静默自动点播放歌
         settings.mediaPlaybackRequiresUserGesture = false
+
+        // 直链下载（http/https）交给系统下载管理器，落到 Download/Storypoem
+        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            try {
+                if (url.startsWith("data:") || url.startsWith("blob:")) return@setDownloadListener
+                val fileName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
+                val request = android.app.DownloadManager.Request(Uri.parse(url)).apply {
+                    addRequestHeader("User-Agent", userAgent)
+                    setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Storypoem/$fileName")
+                }
+                val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+                dm.enqueue(request)
+                Toast.makeText(this, "已开始下载：$fileName", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(this, "下载失败，请检查网络或存储权限", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         // 注入 window.AndroidMCP 原生接口并向静态通道注册主 Activity 引用
         AndroidMcp.mainActivity = this
@@ -157,11 +242,285 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack() // 返回键优先控制 WebView 回退
+    // ==========================================================
+    // 全屏沉浸：隐藏状态栏 + 导航栏（无灰色顶栏），但保留 adjustResize
+    // ==========================================================
+
+    private fun setupFullscreenWindow() {
+        // 纯白窗体底：彻底消除浅色主题残留的灰色状态栏底色
+        window.setBackgroundDrawable(ColorDrawable(Color.WHITE))
+        // 系统栏颜色透明：即使被系统 / 输入法临时唤出，也只是透出网页内容，不会出现白底条带
+        @Suppress("DEPRECATION")
+        run {
+            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+            window.statusBarColor = Color.TRANSPARENT
+            window.navigationBarColor = Color.TRANSPARENT
+        }
+        // 允许内容铺满刘海屏 / 挖孔屏，避免顶部出现色块缺口
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val lp = window.attributes
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            window.attributes = lp
+        }
+        // 关键：decorFitsSystemWindows 保持 true，让 adjustResize 仍然生效，
+        // 键盘弹出时 WebView 真实变矮 → 输入框自动上移，绝不会被键盘遮挡
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        applyImmersiveMode()
+    }
+
+    private fun applyImmersiveMode() {
+        try {
+            @Suppress("DEPRECATION")
+            run {
+                window.statusBarColor = Color.TRANSPARENT
+                window.navigationBarColor = Color.TRANSPARENT
+            }
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.isAppearanceLightStatusBars = false
+            controller.isAppearanceLightNavigationBars = false
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            @Suppress("DEPRECATION")
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * 系统栏 / 键盘守卫：
+     * 1) 状态栏或导航栏一旦被系统顶回来，立刻重新隐藏（保证始终是真全屏，不留白条）；
+     * 2) 键盘收起时补一次 relayout，避免 WebView 视口停留在被压缩后的高度（底栏卡在上移位置）。
+     */
+    private fun installInsetsGuard() {
+        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { view, insets ->
+            val systemBarsVisible = insets.isVisible(WindowInsetsCompat.Type.statusBars()) ||
+                insets.isVisible(WindowInsetsCompat.Type.navigationBars())
+            if (systemBarsVisible) view.post { applyImmersiveMode() }
+            ViewCompat.onApplyWindowInsets(view, insets)
+        }
+
+        // 老系统 / 部分 ROM 只会回调 legacy 的 systemUiVisibility 变化，这里再兜一层
+        @Suppress("DEPRECATION")
+        window.decorView.setOnSystemUiVisibilityChangeListener { visibility ->
+            if (visibility and View.SYSTEM_UI_FLAG_FULLSCREEN == 0) {
+                window.decorView.post { applyImmersiveMode() }
+            }
+        }
+
+        // 键盘高度变化守卫：用可见区域高度判断输入法开合，收起时强制 WebView 重新布局
+        window.decorView.viewTreeObserver.addOnGlobalLayoutListener {
+            if (!::webView.isInitialized) return@addOnGlobalLayoutListener
+            val visibleFrame = android.graphics.Rect()
+            window.decorView.getWindowVisibleDisplayFrame(visibleFrame)
+            val screenHeight = window.decorView.rootView.height
+            if (screenHeight <= 0) return@addOnGlobalLayoutListener
+            val imeVisible = (screenHeight - visibleFrame.bottom) > screenHeight * 0.15f
+            if (imeWasVisible && !imeVisible) {
+                webView.post {
+                    webView.requestLayout()
+                    webView.invalidate()
+                }
+            }
+            imeWasVisible = imeVisible
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // 从系统栏 / 键盘返回页面时重新锁定全屏
+        if (hasFocus) applyImmersiveMode()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        applyImmersiveMode()
+    }
+
+    /** 解析 accept 类型，供 ACTION_GET_CONTENT 兜底使用 */
+    private fun resolveAcceptType(params: WebChromeClient.FileChooserParams?): String {
+        val accepts = params?.acceptTypes ?: return "*/*"
+        for (raw in accepts) {
+            val item = raw.trim()
+            if (item.isEmpty() || item.startsWith(".")) continue // 后缀形式无法直接映射到 MIME
+            if (item.contains("/")) return item
+        }
+        return "*/*"
+    }
+
+    /**
+     * 站外链接（http/https/mailto/tel 等）交给系统处理，站内 file:// 与本地服务不拦截。
+     * @return true 表示已由系统接管，WebView 不再加载
+     */
+    private fun handleExternalUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val lower = url.lowercase()
+        if (lower.startsWith("file://") || lower.startsWith("about:") || lower.startsWith("blob:") ||
+            lower.startsWith("data:") || lower.startsWith("javascript:") || lower.startsWith("content:")
+        ) {
+            return false
+        }
+        val uri = try { Uri.parse(url) } catch (e: Exception) { return false }
+        val scheme = uri.scheme?.lowercase() ?: return false
+        if (scheme == "http" || scheme == "https") {
+            val host = uri.host ?: return false
+            // 本地回环（内置代理 / 调试服务）保持站内处理
+            if (host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0") return false
+        }
+        return try {
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+
+    /**
+     * 统一返回入口：先问网页“还有没有上一页”，网页处理完则吞掉；
+     * 否则回退 WebView 历史；仍无历史时——
+     *   · 物理返回键：二次确认后才允许退出；
+     *   · 边缘滑动手势：静默忽略，绝不退出 APK。
+     */
+    private fun handleBackRequest(fromGesture: Boolean = false) {
+        if (!::webView.isInitialized) {
+            if (!fromGesture) finish()
+            return
+        }
+        try {
+            webView.evaluateJavascript(
+                "(function(){try{return String((window.__storyNativeBack && window.__storyNativeBack()) || 'unhandled');}catch(e){return 'unhandled';}})()"
+            ) { raw ->
+                val result = raw?.trim()?.trim('"') ?: ""
+                if (result == "handled") {
+                    exitArmedAt = 0L
+                    return@evaluateJavascript
+                }
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                    exitArmedAt = 0L
+                    return@evaluateJavascript
+                }
+                if (!fromGesture) askBeforeExit()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            if (!fromGesture) askBeforeExit()
+        }
+    }
+
+    /** 连续两次返回才退出，避免手势误划直接杀掉应用 */
+    private fun askBeforeExit() {
+        val now = System.currentTimeMillis()
+        val gap = now - exitArmedAt
+        if (gap in 1..2000) {
+            exitArmedAt = 0L
+            finish()
         } else {
-            super.onBackPressed()
+            exitArmedAt = now
+            Toast.makeText(this, "再返回一次退出叙事诗", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onBackPressed() {
+        handleBackRequest()
+    }
+
+    /**
+     * 边缘手势返回：从屏幕左边缘向右划 / 右边缘向左划 → 触发返回。
+     * 只在贴边 28dp 内起手且水平位移 ≥72dp 时触发，避免误伤横向滚动列表。
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val width = window.decorView.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+                swipeTracking = ev.x <= edgeZonePx || ev.x >= width - edgeZonePx
+                swipeStartX = ev.x
+                swipeStartY = ev.y
+                swipeStartAt = System.currentTimeMillis()
+            }
+            MotionEvent.ACTION_UP -> {
+                if (swipeTracking) {
+                    swipeTracking = false
+                    val dx = ev.x - swipeStartX
+                    val dy = ev.y - swipeStartY
+                    val elapsed = System.currentTimeMillis() - swipeStartAt
+                    if (elapsed <= 700 && abs(dx) >= edgeDistancePx && abs(dx) >= abs(dy) * 1.6f) {
+                        handleBackRequest(true)
+                    }
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> swipeTracking = false
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    // ==========================================================
+    // 本地通知权限（Android 13+ 运行时授权）
+    // ==========================================================
+
+    /** 供 AndroidMCP 调用：申请 Android 13+ 的本地通知运行时权限 */
+    fun requestNotificationPermissionNow() {
+        runOnUiThread {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    ActivityCompat.requestPermissions(
+                        this,
+                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                        PERMISSIONS_REQUEST_CODE
+                    )
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /** 当前是否已允许本地通知（含用户在系统设置里关闭通知的情况） */
+    fun hasNotificationPermissionNow(): Boolean {
+        return try {
+            if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** 权限申请结果回传网页，便于前端提示“通知已被关闭” */
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != PERMISSIONS_REQUEST_CODE) return
+        val granted = try { hasNotificationPermissionNow() } catch (e: Exception) { false }
+        try {
+            if (::webView.isInitialized) {
+                webView.evaluateJavascript(
+                    "window.StoryNotify && window.StoryNotify._onNativeResult && window.StoryNotify._onNativeResult($granted);",
+                    null
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 

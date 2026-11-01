@@ -131,6 +131,10 @@ APK 版本会解锁全部真机特权（系统悬浮窗、震动、闹钟、本�
 - **Android SDK**（compileSdk 34，minSdk 26 = Android 8.0）
 - **Gradle 8.5**（项目自带 Gradle Wrapper 配置；若未使用 wrapper，请全局安装 gradle 8.5）
 
+> 📌 本仓库的安卓工程在 `Poemnarapk-main/` 子目录里，下文命令请先 `cd Poemnarapk-main`。
+> 首次构建前在 `Poemnarapk-main/local.properties` 里写一行 `sdk.dir=你的Android SDK路径`（该文件已在 `.gitignore` 中忽略）。
+> 如果你的工程路径含中文（例如 `D:\a叙事诗`），`gradle.properties` 里的 `android.overridePathCheck=true` 负责放行 AGP 的非 ASCII 路径检查，否则会直接构建失败。
+
 ### 5.2 配置签名密钥
 
 仓库自带了一个示例签名 `app/storyphone.jks`（密码 `123456`，别名 `key`），**仅用于本地测试**。正式发布请务必替换为你自己的密钥：
@@ -172,6 +176,22 @@ gradle assembleRelease
 - Release：`app/build/outputs/apk/release/app-release.apk`
 
 把生成的 APK 传到手机安装即可。首次启动会请求定位、通知、振动、悬浮窗、本地存储等权限，请全部允许，否则部分特权功能不可用。
+
+### 5.4 APK 壳层行为说明（v2 壳层）
+
+| 能力 | 实现位置 | 说明 |
+| --- | --- | --- |
+| 应用名 | `res/values/strings.xml` | 桌面图标名 = **叙事诗** |
+| 全屏无灰顶栏 | `MainActivity.setupFullscreenWindow()` + `applyImmersiveMode()` + `res/values/styles.xml` | 隐藏状态栏与导航栏，窗口底色纯白；`systemBarsBehavior` 为“滑动临时呼出”，不会长期占用顶部 |
+| 输入框不被键盘遮挡 | Manifest `windowSoftInputMode="adjustResize"` + `WindowCompat.setDecorFitsSystemWindows(window, true)` + `interactive-widget=resizes-content` | 键盘弹出时 WebView 真实变矮，输入框随之上移；`app_native_bridge.js` 还会兜底把聚焦输入框滚进可视区 |
+| 边缘滑动返回 | `MainActivity.dispatchTouchEvent()` → `handleBackRequest(true)` | 左边缘右划 / 右边缘左划（贴边 28dp 内起手、水平位移 ≥72dp）触发返回；先回上一页，回不去则静默忽略，**绝不退出 APK**（只有物理返回键才走“再返回一次退出”），所以桌面左右翻页不会误退 |
+| 返回键不误退 | 同 `handleBackRequest()` | 网页侧 `window.__storyNativeBack()` 按「浮层 → 设置二级 → 应用窗口」逐级回退，全部关完才轮到退出确认 |
+| 数据导入导出 | `assets/app_settings.js` + `AndroidMcp.openExportStream()` | 导出统一落到 `Download/Storypoem/`；Android 10+ 走 MediaStore（无需“所有文件访问”权限），Android 9 及以下直写公共下载目录；导入走 HTML5 `<input type="file">`，壳层已做 `createIntent()` 兜底 |
+| 本地通知权限 | `AndroidMcp.requestNotificationPermission()` / `hasNotificationPermission()` / `openNotificationSettings()`，前端 `window.StoryNotify` | Android 13+ 一次性弹出 `POST_NOTIFICATIONS` 运行时授权；被用户关掉时可直接跳到本应用通知设置页；`showSystemNotification()` 发通知前会自动补齐权限 |
+| 真全屏（无顶部白条） | `MainActivity.setupFullscreenWindow()` / `applyImmersiveMode()` / `installInsetsGuard()` + `app_native_bridge.js` 给 `<html>` 打 `story-native-shell` 标记 | 状态栏与导航栏全隐藏、系统栏颜色透明；系统或输入法把状态栏顶回来时立即再隐藏；壳层内把 `env(safe-area-inset-*)` 留白统一归零（`style.css` 里 `html.story-native-shell` 规则），顶部不再出现浅色条带，应用窗口也不会被安全区顶起来 |
+| 键盘不顶飞页面 | Manifest `adjustResize` + `installInsetsGuard()` + `app_native_bridge.js` 视口守卫 | 键盘弹出时 WebView 真实变矮 → 底栏随键盘上移；键盘收起后壳层主动 `requestLayout()` 并把文档级滚动量归零、桌面滚动位置还原，不会再出现「整页上移且退不回来」；页面里已移除 `interactive-widget` 与 `scrollIntoView` 补丁，避免二次补偿 |
+
+> 网页侧新增的 `app_native_bridge.js` 只依赖壳层暴露的 `AndroidMCP`，在浏览器/PWA 下运行时会退化为 Web Notification 与普通页面返回，不影响网页版。
 
 ---
 
@@ -226,71 +246,31 @@ git push -u origin main
 
 ## 七、配置 GitHub Actions 自动云打包工作流
 
-本仓库已移除自带的 `.github/workflows/` 工作流文件。如果你想在自己的 fork 中恢复「push 到 main 自动云端打包 APK」的能力，按下面步骤创建即可。
+本仓库已内置 `.github/workflows/build-apk.yml`（工作流文件在仓库根目录，安卓工程在 `Poemnarapk-main/` 子目录）。它会在这些时机自动云端打包：
 
-### 7.1 创建工作流文件
+- `git push` 到 `main` / `master`（改动涉及 `Poemnarapk-main/**` 或工作流文件时）
+- Pull Request
+- 在 **Actions → Build APK (叙事诗) → Run workflow** 手动触发
+- 打 tag（`git tag v1.0.0 && git push --tags`）时，额外面向 GitHub Release 上传 APK
 
-在仓库根目录新建文件：
+### 7.1 工作流做了什么
 
-```
-.github/workflows/build-apk.yml
-```
+1. `actions/checkout` 拉取源码；
+2. `actions/setup-java` 安装 JDK 17；
+3. `android-actions/setup-android` 准备 Android SDK，并安装 `platforms;android-34`、`build-tools;34.0.0`；
+4. `gradle/actions/setup-gradle` 装配 Gradle 8.5（无需提交 gradle wrapper）；
+5. 在 `Poemnarapk-main` 目录执行 `gradle :app:assembleRelease`，复用仓库自带 `app/storyphone.jks` 签名；
+6. 产物重命名为 `story-poem-<versionName>-<run-number>.apk`，上传为 Artifact（名称 `story-poem-apk`）。
 
-### 7.2 工作流文件内容
+### 7.2 下载安装包
 
-把以下内容完整粘贴进去：
+构建完成后进入对应的 Workflow Run 页面，在页面底部 **Artifacts** 区域下载 `story-poem-apk`，解压得到 APK，传到手机安装即可。
 
-```yaml
-name: Generate Android APK
+> 首次构建约 8～12 分钟（要下载 Gradle / SDK / 依赖，含 onnxruntime），之后有缓存会快很多。
 
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+### 7.3 想每次都出 Debug 包？
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      # 通过锁定并持久化缓存 ~/.android 密钥目录，确保后续编译的所有 APK 共享同一个数字证书，
-      # 避免真机覆盖安装时的数字证书冲突
-      - name: Cache Android Keystore
-        uses: actions/cache@v4
-        with:
-          path: ~/.android
-          key: ${{ runner.os }}-android-keystore
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.5
-
-      - name: Build APK with Gradle
-        run: gradle assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: StoryPhone-Android-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
-```
-
-### 7.3 触发与下载产物
-
-- 保存后，每次 `git push` 到 `main` 分支都会自动触发构建。
-- 也可以在仓库 **Actions** 标签页手动触发（`workflow_dispatch`）。
-- 构建成功后，进入对应的 Workflow Run 页面，在页面底部的 **Artifacts** 区域下载 `StoryPhone-Android-APK` 压缩包，解压即得到 `app-debug.apk`。
+把工作流里的 `:app:assembleRelease` 换成 `:app:assembleDebug`，产物路径换成 `app/build/outputs/apk/debug/app-debug.apk` 即可（Debug 与 Release 共用同一签名，可互相覆盖安装）。
 
 ### 7.4 （可选）云端 Release 签名
 

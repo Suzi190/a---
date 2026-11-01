@@ -1,18 +1,26 @@
 package com.story.phone
 
+import android.Manifest
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.MediaStore
 import android.provider.Settings
 import android.webkit.JavascriptInterface
 import android.media.MediaPlayer
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import java.io.File
-import java.io.FileWriter
+import java.io.OutputStream
 import org.json.JSONArray
 import org.json.JSONObject
 import ai.onnxruntime.OrtEnvironment
@@ -88,6 +96,10 @@ class AndroidMcp(private val context: Context) {
     fun showSystemNotification(title: String, message: String) {
         Log.d(TAG, "showSystemNotification() called, title=$title, message=${message.take(50)}...")
         try {
+            // Android 13+ 若还没拿到本地通知权限，先申请；拿到后前端可再次触发通知
+            if (!hasNotificationPermission()) {
+                mainActivity?.requestNotificationPermissionNow()
+            }
             // 使用 _v2 后缀的新 channel ID，强制重建 importance（旧 channel 的 importance 一旦创建无法代码修改）
             val channelId = "story_phone_bg_channel_v2"
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
@@ -173,24 +185,126 @@ class AndroidMcp(private val context: Context) {
         return dir
     }
 
-    // 物理文件二进制追加流句柄，保障分批流式直写
-    private var currentFileOutputStream: java.io.FileOutputStream? = null
+    // 物理文件二进制追加流句柄，保障分批流式直写（Android 10+ 走 MediaStore，低版本走直写）
+    private var currentFileOutputStream: OutputStream? = null
+    private var pendingMediaUri: Uri? = null
+
+    /** 导出文件的 MIME 类型（决定系统“下载”目录里能否正确打开） */
+    private fun guessMimeType(fileName: String): String {
+        val lower = fileName.lowercase()
+        return when {
+            lower.endsWith(".zip") -> "application/zip"
+            lower.endsWith(".json") -> "application/json"
+            lower.endsWith(".txt") -> "text/plain"
+            lower.endsWith(".png") -> "image/png"
+            lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".mp3") -> "audio/mpeg"
+            lower.endsWith(".pdf") -> "application/pdf"
+            else -> "application/octet-stream"
+        }
+    }
+
+    /**
+     * 打开导出流。Android 10+ 必须走 MediaStore（分区存储下直接写 /sdcard/Download 会 EACCES），
+     * Android 9 及以下仍走公共下载目录直写。
+     */
+    private fun openExportStream(fileName: String, replaceExisting: Boolean): OutputStream? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val resolver = context.contentResolver
+                val relativePath = Environment.DIRECTORY_DOWNLOADS + "/Storypoem"
+                if (replaceExisting) deleteExistingDownloads(fileName, relativePath)
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, guessMimeType(fileName))
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                    val stream = resolver.openOutputStream(uri)
+                    if (stream != null) {
+                        pendingMediaUri = uri
+                        return stream
+                    }
+                    try { resolver.delete(uri, null, null) } catch (e: Exception) { }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "openExportStream() MediaStore failed: ${e.message}")
+                e.printStackTrace()
+            }
+        }
+        // 低版本或 MediaStore 失败时的兜底直写
+        return try {
+            val targetFile = File(getDownloadDir(), fileName)
+            if (targetFile.exists()) targetFile.delete()
+            java.io.FileOutputStream(targetFile, false)
+        } catch (e: Exception) {
+            Log.e(TAG, "openExportStream() legacy failed: ${e.message}")
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /** 覆盖导出前清理同名的历史文件，避免出现 “xxx (1).json” */
+    private fun deleteExistingDownloads(fileName: String, relativePath: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        try {
+            val resolver = context.contentResolver
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(MediaStore.MediaColumns._ID)
+            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+            val args = arrayOf(fileName, "$relativePath/")
+            resolver.query(collection, projection, selection, args, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(0)
+                    try { resolver.delete(ContentUris.withAppendedId(collection, id), null, null) } catch (e: Exception) { }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /** 提交 MediaStore 挂起项，让文件在系统“下载”中正式可见 */
+    private fun finalizePendingMedia() {
+        val uri = pendingMediaUri ?: return
+        pendingMediaUri = null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        try {
+            val values = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            context.contentResolver.update(uri, values, null, null)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /** 静默关闭当前导出流，避免下半段写入串文件 */
+    private fun closeCurrentExportStream() {
+        try {
+            currentFileOutputStream?.flush()
+            currentFileOutputStream?.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        currentFileOutputStream = null
+        finalizePendingMedia()
+    }
 
     // 1.1 初始化真机物理分片写入流：开辟并锁定目标 ZIP 文件 (清空历史同名备份)
     @JavascriptInterface
     fun startBinaryChunkedSave(fileName: String): Boolean {
         Log.d(TAG, "startBinaryChunkedSave() called, fileName=$fileName")
         return try {
-            currentFileOutputStream?.close()
-            currentFileOutputStream = null
-
-            val targetFile = File(getDownloadDir(), fileName)
-            if (targetFile.exists()) {
-                targetFile.delete()
+            closeCurrentExportStream()
+            val stream = openExportStream(fileName, true)
+            if (stream == null) {
+                false
+            } else {
+                currentFileOutputStream = stream
+                true
             }
-            // 启用 append = true 追加模式
-            currentFileOutputStream = java.io.FileOutputStream(targetFile, true)
-            true
         } catch (e: Exception) {
             Log.e(TAG, "startBinaryChunkedSave() failed: ${e.message}")
             e.printStackTrace()
@@ -221,26 +335,34 @@ class AndroidMcp(private val context: Context) {
             currentFileOutputStream?.flush()
             currentFileOutputStream?.close()
             currentFileOutputStream = null
+            finalizePendingMedia()
             true
         } catch (e: Exception) {
             Log.e(TAG, "closeBinaryChunkedSave() failed: ${e.message}")
             e.printStackTrace()
+            currentFileOutputStream = null
+            finalizePendingMedia()
             false
         }
     }
 
-    // 1.4 降级容灾直写：保留作为纯文本备份或单卡片调试导入直写
+    // 1.4 文本整体直写：美化包 / 人设聊天备份等 JSON 导出（Android 10+ 走 MediaStore）
     @JavascriptInterface
     fun saveBackupFile(jsonString: String, fileName: String): Boolean {
         Log.d(TAG, "saveBackupFile() called, fileName=$fileName, data.length=${jsonString.length}")
         return try {
-            val targetFile = File(getDownloadDir(), fileName)
-            val writer = FileWriter(targetFile)
-            writer.write(jsonString)
-            writer.close()
-            true
+            val stream = openExportStream(fileName, true)
+            if (stream == null) {
+                false
+            } else {
+                stream.use { it.write(jsonString.toByteArray(Charsets.UTF_8)) }
+                finalizePendingMedia()
+                true
+            }
         } catch (e: Exception) {
+            Log.e(TAG, "saveBackupFile() failed: ${e.message}")
             e.printStackTrace()
+            finalizePendingMedia()
             false
         }
     }
@@ -593,14 +715,56 @@ class AndroidMcp(private val context: Context) {
         }
     }
 
-    // 5. 调起系统通知监听设置页
+    // 5. 本地通知权限：Android 13+ 申请 POST_NOTIFICATIONS 运行时授权；已授权则直达通知设置页
     @JavascriptInterface
     fun requestNotificationPermission() {
         Log.d(TAG, "requestNotificationPermission() called")
         try {
-            val intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS").apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            if (!hasNotificationPermission()) {
+                val activity = mainActivity
+                if (activity != null) {
+                    activity.requestNotificationPermissionNow()
+                } else {
+                    openNotificationSettings()
+                }
+                return
             }
+            openNotificationSettings()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // 5.1 查询本地通知是否可用（权限 + 系统通知总开关）
+    @JavascriptInterface
+    fun hasNotificationPermission(): Boolean {
+        return try {
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    // 5.2 跳转本应用的通知设置页（用户手动关过通知时引导开启）
+    @JavascriptInterface
+    fun openNotificationSettings() {
+        Log.d(TAG, "openNotificationSettings() called")
+        try {
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                }
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+            }
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
             context.startActivity(intent)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -793,7 +957,7 @@ class AndroidMcp(private val context: Context) {
     fun requestNotificationListenerPermission() {
         Log.d(TAG, "requestNotificationListenerPermission() called")
         try {
-            val intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS").apply {
+            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             context.startActivity(intent)

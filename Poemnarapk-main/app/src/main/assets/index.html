@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<!-- 原生壳（APK）：系统栏已隐藏，尽早打标记把安全区留白归零，避免顶部白条闪一下（style.css 有配套规则） -->
+<script>if (window.AndroidMCP) { document.documentElement.classList.add('story-native-shell'); }</script>
   <meta name="theme-color" id="theme-color-meta" content="#f4f6fa">
   <!-- iOS PWA Standalone Mode & Status Bar Safe Area Inset Capability -->
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -5444,6 +5446,8 @@
   <script src="app_encounter.js"></script>
   <script src="app_quicktravel.js"></script>
   <script src="app_router.js"></script>
+<!-- 原生壳交互桥：返回键/边缘滑动回退、键盘安全滚动、本地通知助手（必须最后加载） -->
+<script src="app_native_bridge.js"></script>
   <script>
     // 微信展开面板滚动圆点指示器动态触发与点击导航脚本 (零依赖原生驱动)
     document.addEventListener("DOMContentLoaded", () => {
