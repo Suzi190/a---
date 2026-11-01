@@ -856,7 +856,10 @@ const momentSystem = {
     setTimeout(() => {
       const targetEl = document.querySelector(`.moment-post-card[data-moment-id="${momentId}"]`);
       if (targetEl) {
-        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 只滚动朋友圈列表容器，绝不调用 scrollIntoView（它会连带滚动整个文档）
+        if (typeof window.storyScrollToElement === "function") {
+          window.storyScrollToElement(targetEl, { block: "center" });
+        }
         // 柔和地闪烁浅黄色，提示视觉落点
         targetEl.style.transition = 'background-color 0.4s ease';
         targetEl.style.backgroundColor = '#fef08a';

@@ -272,7 +272,12 @@
         const el = document.querySelector(`[data-msg-id="${msgId}"]`);
         if (el) {
           clearInterval(interval);
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // 只滚动消息列表自身，绝不调用 scrollIntoView：
+          // 它会把所有祖先（含文档本身）一起滚动，文档一旦被滚走用户拖不回来，
+          // 表现就是整页上移、桌面空白、Dock 跑到屏幕上方
+          if (typeof window.storyScrollToElement === 'function') {
+            window.storyScrollToElement(el, { block: 'center' });
+          }
           
           // 注入 QQ 风格高亮闪动效果
           el.classList.add('chat-search-highlight-flash');

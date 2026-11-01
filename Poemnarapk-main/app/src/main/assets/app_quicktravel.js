@@ -2064,7 +2064,12 @@
     existingOpenings.forEach(v => qtRenderOpeningItem(v));
     document.getElementById('qt-opening-add').onclick = () => {
       qtRenderOpeningItem('');
-      openingsList.lastElementChild && openingsList.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      // 只滚动快穿局面板自身，绝不调用 scrollIntoView：
+      // 它会连带滚动整个文档，导致退出快穿局后整页被顶起（桌面空白、Dock 跑到顶部）
+      const lastAcc = openingsList.lastElementChild;
+      if (lastAcc && typeof window.storyScrollToElement === 'function') {
+        window.storyScrollToElement(lastAcc, { block: 'end' });
+      }
     };
 
     // 加载世界书列表：四层手风琴（容器 → 分组 → 条目 → 内容），按 group 分组

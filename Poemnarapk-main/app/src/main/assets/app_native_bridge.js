@@ -46,7 +46,11 @@
       var prevClose = window.closeApp;
       var wrappedClose = function (app) {
         recordClose(app);
-        return prevClose.apply(this, arguments);
+        var result = prevClose.apply(this, arguments);
+        // 关窗后立刻复位整页位移：WebView 被 scrollIntoView / 输入法顶起后
+        // 文档滚动量会残留，表现为「桌面一片空白、Dock 跑到屏幕上方」。
+        resetViewportSoon();
+        return result;
       };
       wrappedClose.__storyHooked = true;
       window.closeApp = wrappedClose;
@@ -234,6 +238,114 @@
     } catch (e) { }
   }
 
+  /**
+   * 关窗 / 手势结束后复位视口：立即一次 + 过渡动画结束后再兜一次
+   * （应用窗口滑出动画 350ms，期间 WebView 仍可能被系统推来推去）
+   */
+  function resetViewportSoon() {
+    resetPageOffset();
+    window.setTimeout(resetPageOffset, 60);
+    window.setTimeout(resetPageOffset, 420);
+  }
+  window.StoryResetViewport = resetPageOffset;
+
+  /**
+   * 找最近的「可滚动祖先容器」。
+   */
+  function findScrollableAncestor(el) {
+    var node = el && el.parentElement;
+    while (node && node !== document.body && node !== document.documentElement) {
+      var cs = window.getComputedStyle(node);
+      var oy = cs ? cs.overflowY : "";
+      if ((oy === "auto" || oy === "scroll" || oy === "overlay") &&
+          node.scrollHeight - node.clientHeight > 2) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  /**
+   * 容器内滚动：el.scrollIntoView() 的安全替代品。
+   * scrollIntoView 会连带滚动**所有祖先元素，包括文档本身**；本项目页面全是
+   * 「固定高度 + 内部容器滚动」，文档一旦被滚走，body 的 overflow:hidden 又让
+   * 用户拖不回来 —— 表现就是整页被顶起、桌面一片空白、Dock 跑到屏幕上方。
+   * 这里只滚动最近的滚动容器，绝不惊动文档。
+   * @param {Element} el
+   * @param {{container?: Element, block?: string, smooth?: boolean}} [opts]
+   *        block: "start" | "center" | "end"，默认 center
+   * @return {boolean} 是否找到了可滚动容器
+   */
+  window.storyScrollToElement = function (el, opts) {
+    if (!el) return false;
+    opts = opts || {};
+    var box = opts.container || findScrollableAncestor(el);
+    if (!box) return false;
+    var boxRect = box.getBoundingClientRect();
+    var elRect = el.getBoundingClientRect();
+    var block = opts.block || "center";
+    var top = elRect.top - boxRect.top + box.scrollTop;
+    if (block === "end") top = top + elRect.height - box.clientHeight;
+    else if (block === "center") top = top - (box.clientHeight - elRect.height) / 2;
+    var max = Math.max(0, box.scrollHeight - box.clientHeight);
+    top = Math.max(0, Math.min(top, max));
+    try {
+      if (opts.smooth !== false && typeof box.scrollTo === "function") {
+        box.scrollTo({ top: top, behavior: "smooth" });
+      } else {
+        box.scrollTop = top;
+      }
+    } catch (e) {
+      box.scrollTop = top;
+    }
+    return true;
+  };
+
+  /**
+   * 文档级滚动守卫（关键修复）：
+   * overflow:hidden 只禁止「用户手势滚动」，程序滚动（scrollIntoView、输入框
+   * 自动上移、输入法 / 系统栏把页面顶起来）依旧会改文档滚动量，而一旦被顶起来
+   * 就再也回不去。这里在 scroll 事件的捕获阶段立刻把文档滚动量归零。
+   */
+  function installDocumentScrollGuard() {
+    var scheduled = false;
+    function repair() {
+      scheduled = false;
+      resetPageOffset();
+    }
+    function schedule() {
+      if (scheduled) return;
+      scheduled = true;
+      if (typeof Promise === "function") Promise.resolve().then(repair);
+      else window.setTimeout(repair, 0);
+    }
+    function isDocTarget(t) {
+      return !t || t === window || t === document ||
+        t === document.documentElement || t === document.body ||
+        t === document.scrollingElement;
+    }
+    function onScroll(e) {
+      if (!isDocTarget(e && e.target)) return;
+      var se = document.scrollingElement || document.documentElement;
+      if ((se && (se.scrollTop || se.scrollLeft)) ||
+          window.pageYOffset || window.scrollY) {
+        schedule();
+      }
+    }
+    window.addEventListener("scroll", onScroll, true);
+    document.addEventListener("scroll", onScroll, true);
+    // 手势 / 触摸 / 失焦结束后再兜一层（输入法收起、手势返回都会留下滚动量）
+    document.addEventListener("pointerup", schedule, true);
+    document.addEventListener("touchend", schedule, true);
+    document.addEventListener("focusout", schedule, true);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("scroll", function () {
+        if ((window.pageYOffset || window.scrollY) !== 0) schedule();
+      });
+    }
+  }
+
   function setupNativeViewport() {
     var html = document.documentElement;
     if (!html || !isNativeShell()) return; // 浏览器 / PWA 保留安全区留白
@@ -338,6 +450,7 @@
   // ---------- 6. 启动钩子 ----------
   function boot() {
     hookAppNavigation();
+    installDocumentScrollGuard();
     setupNativeViewport();
     console.log("[storyBridge] ready");
   }

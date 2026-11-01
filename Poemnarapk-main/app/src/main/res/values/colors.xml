@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用主背景色：与网页 style.css 里的 bg-main 变量（#f4f6fa）严格一致。
+         窗体底色 / WebView 底色都用它，系统栏或挖孔区任何偶发露出的缝隙
+         都会是这层浅灰蓝，而不是刺眼的纯白条带。 -->
+    <color name="app_bg">#FFF4F6FA</color>
+</resources>

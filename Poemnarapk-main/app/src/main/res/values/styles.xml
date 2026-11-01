@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 叙事诗全屏沉浸主题：纯白窗体底色，状态栏/导航栏由 MainActivity 沉浸模式统一隐藏 -->
+    <!-- 叙事诗全屏沉浸主题：窗体底色统一用 app_bg（#f4f6fa，与网页 bg-main 变量同色），
+         状态栏/导航栏由 MainActivity 沉浸模式统一隐藏；即使被系统临时唤出，
+         露出的也只是与页面同色的浅灰蓝，不再出现刺眼的白色顶条 -->
     <style name="Theme.StoryPhone" parent="Theme.AppCompat.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
-        <item name="android:colorBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/app_bg</item>
+        <item name="android:colorBackground">@color/app_bg</item>
         <item name="android:windowNoTitle">true</item>
         <item name="windowNoTitle">true</item>
         <item name="windowActionBar">false</item>
@@ -11,5 +13,7 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
+        <!-- 允许内容铺满挖孔屏 / 刘海屏，避免顶部被裁出一条窗口底色缺口 -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
     </style>
 </resources>

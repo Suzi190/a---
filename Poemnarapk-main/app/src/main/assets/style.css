@@ -14,6 +14,15 @@
   --radius: 16px;
 }
 
+html {
+  height: 100%;
+  /* 文档自身绝不滚动：页面全部是「固定高度 + 内部容器滚动」布局，
+     文档一旦被程序滚动（scrollIntoView / 输入法顶起）就再也拖不回来，
+     表现就是整页上移、桌面空白、Dock 跑到屏幕上方 */
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -30,6 +39,8 @@ body {
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  overscroll-behavior: none;
+  position: relative;
   user-select: none;
 }
 
@@ -42,6 +53,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   box-shadow: none;
   border-radius: 0;
   border: none;
@@ -71,6 +83,16 @@ html.story-native-shell #phone-container {
   width: 100% !important;
   padding-top: 0 !important;
   padding-bottom: 0 !important;
+  /* 桌面主体撑满剩余空间，Dock 永远贴在底部；
+     即使某次异常把 #desktop 压成 0 高，Dock 也不会跑到屏幕上方 */
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+}
+
+html.story-native-shell #desktop {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
 }
 
 html.story-native-shell #app-window-container {

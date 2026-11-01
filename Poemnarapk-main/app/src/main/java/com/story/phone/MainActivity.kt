@@ -71,10 +71,20 @@ class MainActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.webview)
         // ② 去掉 WebView 默认灰底与拖动时的边缘泛光，避免顶部/底部出现灰色条带
-        webView.setBackgroundColor(Color.WHITE)
+        //    底色改用与应用主背景一致的 #f4f6fa：任何露出的缝隙都不再是刺眼的白色
+        val appBg = ContextCompat.getColor(this, R.color.app_bg)
+        webView.setBackgroundColor(appBg)
         webView.overScrollMode = View.OVER_SCROLL_NEVER
         // ③ 系统栏 / 键盘守卫：状态栏被顶回来就再隐藏；键盘收起时补一次 relayout
         installInsetsGuard()
+        // ④ 文档级滚动守卫：本项目页面全部是「固定高度 + 内部容器滚动」布局，
+        //    WebView 自身一旦被 scrollIntoView / 输入框自动上移顶起来（overflow:hidden
+        //    只禁用户手势、不禁程序滚动），用户就再也拖不回来 —— 真机上表现就是
+        //    「桌面一片空白、Dock 跑到屏幕上方、下方露出大片底色」。
+        //    这里把 WebView 自身的滚动量钉死在 0，页面内部容器的滚动完全不受影响。
+        webView.setOnScrollChangeListener { v, _, _, _, _ ->
+            if (v != null && (v.scrollX != 0 || v.scrollY != 0)) v.scrollTo(0, 0)
+        }
 
         
         webView.webViewClient = object : WebViewClient() {
@@ -247,8 +257,9 @@ class MainActivity : AppCompatActivity() {
     // ==========================================================
 
     private fun setupFullscreenWindow() {
-        // 纯白窗体底：彻底消除浅色主题残留的灰色状态栏底色
-        window.setBackgroundDrawable(ColorDrawable(Color.WHITE))
+        // 窗体底色 = 应用主背景色（#f4f6fa，与网页 --bg-main 一致）：
+        // 系统栏 / 挖孔区任何偶发露出的缝隙都与页面同色，不会出现刺眼白色条带
+        window.setBackgroundDrawable(ColorDrawable(ContextCompat.getColor(this, R.color.app_bg)))
         // 系统栏颜色透明：即使被系统 / 输入法临时唤出，也只是透出网页内容，不会出现白底条带
         @Suppress("DEPRECATION")
         run {
@@ -344,6 +355,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        applyImmersiveMode()
+    }
+
+    // 折叠屏展开 / 分屏 / 旋转等配置变化（activity 声明了 configChanges，不会重建）后，
+    // 系统栏可能被系统重新显示，这里立即再锁一次全屏，避免顶部重新出现状态栏白条
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
         applyImmersiveMode()
     }
 

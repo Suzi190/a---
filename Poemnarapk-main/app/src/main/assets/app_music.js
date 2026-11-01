@@ -1161,7 +1161,10 @@
 
       const activeEl = document.getElementById(`card-lyric-line-${this.activeLyricIndex}`);
       if (activeEl) {
-        activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        // 只滚动歌词盒子，绝不调用 scrollIntoView（它会连带滚动整个文档）
+        if (typeof window.storyScrollToElement === "function") {
+          window.storyScrollToElement(activeEl, { block: "center", container: box });
+        }
       }
     },
 
