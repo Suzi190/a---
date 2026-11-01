@@ -11,8 +11,8 @@ android {
         applicationId = "com.story.phone"
         minSdk = 26 // 安卓 8.0，保障完美兼容通知监听、硬件马达与无障碍接口
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.3.1"
+        versionCode = 7
+        versionName = "1.3.2"
 
         // ★ 体积优化：只打包真机 ABI。
         //   onnxruntime 的 x86 / x86_64 两个 .so 合计约 78MB，只在模拟器里用得上，
@@ -45,12 +45,23 @@ android {
 
     // 签名配置：使用项目自带的 storyphone.jks
     // 密码和别名都是好记的 123456 / key
+    //
+    // ★ 必须显式开启 v1/v2/v3 三套签名，否则真机装不上：
+    //   minSdk = 26（≥24）时 AGP 默认只打 v2、**关掉 v1（JAR 签名）**，
+    //   而 vivo / OPPO 等国产 ROM 的安装器（QQ、文件管理器走同一套校验）仍按老式
+    //   JarFile 路径校验证书，遇到只有 v2 的包会报
+    //   「应用未安装：软件包似乎无效 / 安装包缺乏开发者证书」
+    //   （即 INSTALL_PARSE_FAILED_NO_CERTIFICATES）。
+    //   显式开三套签名后，新老校验路径都能验到证书，安装恢复正常。
     signingConfigs {
         create("release") {
             storeFile = file("storyphone.jks")
             storePassword = "123456"
             keyAlias = "key"
             keyPassword = "123456"
+            enableV1Signing = true // JAR 签名（兼容国产 ROM 安装器的老校验路径）
+            enableV2Signing = true // APK Signature Scheme v2（Android 7+ 主校验）
+            enableV3Signing = true // v3（Android 9+ 密钥轮换支持）
         }
     }
 
