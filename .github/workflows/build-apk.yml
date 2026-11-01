@@ -1,0 +1,73 @@
+name: Build APK (叙事诗)
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'Poemnarapk-main/**'
+      - '.github/workflows/build-apk.yml'
+  pull_request:
+    paths:
+      - 'Poemnarapk-main/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Assemble Release APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Poemnarapk-main
+
+    steps:
+      - name: 拉取源码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 platform 34 / build-tools 34
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: 配置 Gradle（8.5）
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.5'
+
+      - name: 编译 Release APK
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: 重命名产物
+        run: |
+          mkdir -p out
+          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -n1)
+          cp app/build/outputs/apk/release/app-release.apk "out/story-poem-${VERSION:-1.0.0}-${GITHUB_RUN_NUMBER}.apk"
+          ls -lh out
+
+      - name: 上传 APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-poem-apk
+          path: Poemnarapk-main/out/*.apk
+          if-no-files-found: error
+
+      - name: 打 Tag 时自动发布到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Poemnarapk-main/out/*.apk
+          generate_release_notes: true
