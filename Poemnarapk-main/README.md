@@ -269,7 +269,7 @@ git push -u origin main
 
 1. `actions/checkout` 拉取源码；
 2. `actions/setup-java` 安装 JDK 17；
-3. `android-actions/setup-android` 准备 Android SDK，并安装 `platforms;android-34`、`build-tools;34.0.0`；
+3. 直接复用 runner 自带的 Android SDK（`setup-android@v3` 在自带 cmdline-tools 的镜像上会失败），用 `sdkmanager` 补装 `platforms;android-34`、`build-tools;34.0.0`；
 4. `gradle/actions/setup-gradle` 装配 Gradle 8.5（无需提交 gradle wrapper）；
 5. 在 `Poemnarapk-main` 目录执行 `gradle :app:assembleRelease`，复用仓库自带 `app/storyphone.jks` 签名；
 6. 产物重命名为 `story-poem-<versionName>-<run-number>.apk`，上传为 Artifact（名称 `story-poem-apk`）。
@@ -306,6 +306,36 @@ git push -u origin main
 4. 把 `Build APK` 步骤改成 `gradle assembleRelease`，并修改 `app/build.gradle.kts` 的 `signingConfigs` 读取环境变量。
 
 > 出于安全考虑，**不要把真实的 `.jks` 文件或密码直接提交到仓库**，永远通过 Secrets 注入。
+
+### 7.5 真机报「软件包似乎无效 / 安装包缺乏开发者证书」怎么办
+
+这是**签名方案缺失**，不是包损坏。`minSdk >= 24` 时 AGP 默认只打 **v2**、把 **v1（JAR 签名）关掉**；而 vivo / OPPO 等国产 ROM 的安装器（QQ 内置安装、文件管理器安装走同一套校验）仍会按老式 `JarFile` 路径校验证书，找不到就报 `INSTALL_PARSE_FAILED_NO_CERTIFICATES`。
+
+本项目已在 `app/build.gradle.kts` 里显式打开三套签名：
+
+```kotlin
+signingConfigs {
+    create("release") {
+        // ...
+        enableV1Signing = true // 兼容国产 ROM 安装器的老校验路径
+        enableV2Signing = true // Android 7+ 主校验
+        enableV3Signing = true // Android 9+ 密钥轮换
+    }
+}
+```
+
+自检命令（三行都要是 `true` 才算合格）：
+
+```bash
+$ANDROID_HOME/build-tools/34.0.0/apksigner verify -v --min-sdk-version 21 app-release.apk
+# Verified using v1 scheme (JAR signing): true
+# Verified using v2 scheme (APK Signature Scheme v2): true
+# Verified using v3 scheme (APK Signature Scheme v3): true
+```
+
+> 排查经验：`apksigner verify -v` 不带 `--min-sdk-version` 时会按 `minSdk=26` 判定「v1 已无意义」而报 v1 false，这不代表没签 v1；用 `jarsigner -verify app-release.apk` 看到「jar 已验证」即可确认 v1 真实有效。
+
+如果仍装不上，按顺序排查：① 手机上是否开了 vivo「纯净模式 / 严格安装」（关掉后重试）；② 传输过程中文件被截断（比对 SHA-256）；③ 旧版本是同包名不同签名的包，需先卸载旧版。
 
 ---
 
