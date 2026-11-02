@@ -1351,6 +1351,21 @@
   let qtGameLiveMode = 'off'; // 弹幕三态：'off'(红/关闭) | 'green'(绿/随AI输出) | 'blue'(蓝/每轮单独调用)
   let qtDanmakuTimer = null;
   let qtCurrentBeautify = null; // 当前剧本挂载的美化套件
+  // 快穿局挂在 document 上的监听（系统球球拖拽）：必须能回收。
+  // 每渲染一次游戏视图都会重新绑定，不回收的话反复进出会越堆越多。
+  let qtBallDocListeners = [];
+
+  function qtBindBallDocListener(type, fn, opts) {
+    document.addEventListener(type, fn, opts);
+    qtBallDocListeners.push([type, fn, opts]);
+  }
+
+  function qtUnbindBallDocListeners() {
+    qtBallDocListeners.forEach((item) => {
+      try { document.removeEventListener(item[0], item[1], item[2]); } catch (e) {}
+    });
+    qtBallDocListeners = [];
+  }
 
   function qtEscape(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1460,6 +1475,44 @@
     } catch (e) {}
     qtInitialized = true;
     qtRoute();
+  };
+
+  /**
+   * 退出快穿局：把「跟全局共享」的东西全部还回去。
+   * 由 app_desktop.js 的 closeApp('quicktravel') 调用。
+   * 只回收资源与全局副作用，不动用户的游玩进度（qtCurrentView / qtCurrentGameId 保留，
+   * 下次进入可以接着上次的界面），所以反复进出也不会让 DOM、定时器、document 监听越积越多。
+   */
+  window.teardownQuickTravelApp = function () {
+    try { qtStopDanmaku(); } catch (e) {}
+    try { qtUnbindBallDocListeners(); } catch (e) {}
+    // 提示条：连它的淡出计时器一起清掉
+    try {
+      const toast = document.getElementById('qt-toast');
+      if (toast) {
+        clearTimeout(toast._timer);
+        toast.remove();
+      }
+    } catch (e) {}
+    // 工具/直播面板浮层
+    try {
+      const overlay = document.getElementById('qt-overlay');
+      if (overlay) {
+        overlay.classList.remove('active');
+        overlay.innerHTML = '';
+      }
+    } catch (e) {}
+    // 剧本挂载的美化 CSS 是注入到 document.head 的，退出时摘掉，避免污染桌面/其它应用
+    try {
+      const beautifyStyle = document.getElementById('qt-game-beautify-css');
+      if (beautifyStyle) beautifyStyle.remove();
+    } catch (e) {}
+    // 输入框失焦 → 收起软键盘，别让 WebView 停在被压缩的视口高度上
+    try {
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT' || ae.isContentEditable)) ae.blur();
+    } catch (e) {}
+    qtCurrentBeautify = null;
   };
 
   function qtRoute() {
@@ -4285,6 +4338,7 @@ ${dialogText}`;
   function qtInitSystemBall() {
     const ball = document.getElementById('qt-sys-ball');
     if (!ball) return;
+    qtUnbindBallDocListeners(); // 先回收上一轮绑定的 document 监听，避免重复进出时叠加
     ball.innerHTML = '<div class="qt-sys-ball-inner"><div class="qt-sys-face">' + qtSysBallState.face + '</div></div>';
     // 应用显示/隐藏状态
     ball.style.display = qtSysBallState.visible === false ? 'none' : '';
@@ -4350,16 +4404,17 @@ ${dialogText}`;
 
     // 鼠标
     inner.addEventListener('mousedown', (e) => { e.preventDefault(); startDrag(e.clientX, e.clientY); });
-    document.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
-    document.addEventListener('mouseup', endDrag);
     // 触摸
     inner.addEventListener('touchstart', (e) => {
       const t = e.touches[0]; startDrag(t.clientX, t.clientY);
     }, { passive: true });
-    document.addEventListener('touchmove', (e) => {
+    // document 级监听统一登记，退出快穿局时由 qtUnbindBallDocListeners() 一次性回收
+    qtBindBallDocListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
+    qtBindBallDocListener('mouseup', endDrag);
+    qtBindBallDocListener('touchmove', (e) => {
       if (dragging) { const t = e.touches[0]; moveDrag(t.clientX, t.clientY); }
     }, { passive: true });
-    document.addEventListener('touchend', endDrag);
+    qtBindBallDocListener('touchend', endDrag);
     // 阻止右键菜单
     inner.addEventListener('contextmenu', (e) => e.preventDefault());
   }

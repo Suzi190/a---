@@ -849,15 +849,40 @@ function openApp(app) {
     if (app === 'shopping' && typeof initShoppingApp === 'function') initShoppingApp();
     if (app === 'encounter' && typeof initEncounterApp === 'function') initEncounterApp();
     if (app === 'quicktravel' && typeof initQuickTravelApp === 'function') initQuickTravelApp();
+
+    // 应用窗口滑出动画（350ms）期间视口可能被系统推来推去，动画结束后自检一次布局
+    if (window.StoryLayoutGuard) window.StoryLayoutGuard.repair('openApp:' + app);
   }
 }
 
+/**
+ * 收起软键盘。
+ * 键盘还开着就关窗，WebView 会停在被压缩的视口高度上，
+ * 回到桌面就变成「Dock 上浮 + 下方一片空白」，所以关窗前必须先失焦收键盘。
+ */
+function dismissSoftKeyboard() {
+  try {
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === "TEXTAREA" || ae.tagName === "INPUT" || ae.isContentEditable)) {
+      ae.blur();
+    }
+  } catch (e) {}
+}
+
 function closeApp(app) {
+  dismissSoftKeyboard();
   const win = document.getElementById(`win-${app}`);
   if (win) {
     win.classList.remove("active");
     updateThemeColor("#f4f6fa");
   }
+  // 带全局副作用的应用在这里做幂等清理（快穿局：弹幕定时器、document 级监听、
+  // 注入的 #qt-toast / #qt-overlay / qt-game-beautify-css），避免反复进出越积越多
+  if (app === 'quicktravel' && typeof window.teardownQuickTravelApp === 'function') {
+    try { window.teardownQuickTravelApp(); } catch (e) { console.warn('teardownQuickTravelApp 失败:', e); }
+  }
+  // 关窗动画结束后再自检布局：文档偏移 / 视口高度残留都在这里被拉回正轨
+  if (window.StoryLayoutGuard) window.StoryLayoutGuard.repair('closeApp:' + app);
 }
 
 // 采用 Pointer Events 触控/鼠标完美居中跟手拖拽及双向换位

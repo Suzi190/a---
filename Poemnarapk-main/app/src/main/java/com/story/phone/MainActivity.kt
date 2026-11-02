@@ -345,13 +345,20 @@ class MainActivity : AppCompatActivity() {
             if (systemBarsVisible) view.post { applyImmersiveMode() }
 
             if (::webView.isInitialized) {
-                // 只处理键盘：系统栏 inset 全部丢弃，WebView 才能铺满整屏
-                val imeBottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                // 只处理键盘：系统栏 inset 全部丢弃，WebView 才能铺满整屏。
+                // 关键：必须先 isVisible(ime()) 再取 ime().bottom，不能只读 bottom ——
+                // 部分 ROM（MIUI / HyperOS / EMUI）在键盘收起后仍会回传过期的 IME inset，
+                // 照着它设 bottomMargin，WebView 就会永久矮一截：页面只能在「缩小的视口」
+                // 里排版，于是底栏上浮、下方露出大片壁纸/空白，而且不会自行恢复。
+                val imeVisible = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                    insets.isVisible(WindowInsetsCompat.Type.ime())
+                val imeBottom = if (imeVisible)
                     insets.getInsets(WindowInsetsCompat.Type.ime()).bottom else 0
                 val lp = webView.layoutParams
                 if (lp is ViewGroup.MarginLayoutParams && lp.bottomMargin != imeBottom) {
                     lp.bottomMargin = imeBottom
                     webView.layoutParams = lp
+                    webView.requestLayout()
                 }
                 webView.fitsSystemWindows = false
             }
@@ -375,12 +382,29 @@ class MainActivity : AppCompatActivity() {
             if (screenHeight <= 0) return@addOnGlobalLayoutListener
             val imeVisible = (screenHeight - visibleFrame.bottom) > screenHeight * 0.15f
             if (imeWasVisible && !imeVisible) {
+                // 键盘收起：清掉可能残留的底部留白 + 强制重新布局，
+                // 否则视口会停在被压缩的高度上（底栏卡在上移位置）
+                clearWebViewImeMargin()
                 webView.post {
                     webView.requestLayout()
                     webView.invalidate()
                 }
             }
             imeWasVisible = imeVisible
+        }
+    }
+
+    /**
+     * 键盘不在时把 WebView 底部留白抹平。
+     * 只在「确实非 0」时才写 layoutParams，避免每次全局布局都触发一次 requestLayout。
+     */
+    private fun clearWebViewImeMargin() {
+        if (!::webView.isInitialized) return
+        val lp = webView.layoutParams
+        if (lp is ViewGroup.MarginLayoutParams && lp.bottomMargin != 0) {
+            lp.bottomMargin = 0
+            webView.layoutParams = lp
+            webView.requestLayout()
         }
     }
 
@@ -393,6 +417,8 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         applyImmersiveMode()
+        // 从后台 / 其它应用回来时，ROM 可能留下过期的 IME 留白，这里顺手抹平
+        if (!imeWasVisible) clearWebViewImeMargin()
     }
 
     // 折叠屏展开 / 分屏 / 旋转等配置变化（activity 声明了 configChanges，不会重建）后，

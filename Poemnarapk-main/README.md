@@ -351,7 +351,13 @@ $ANDROID_HOME/build-tools/34.0.0/apksigner verify -v --min-sdk-version 21 app-re
 3. 于是看到的就是：桌面网格被滚出屏幕上方（一片空白）、Dock 栏跑到屏幕上方、Dock 下方露出大块底色。
 4. 顶部白条则来自窗口 / WebView 底色：`windowBackground` 与 `webView.setBackgroundColor()` 原来是纯白，系统栏或挖孔区一露出白色就非常刺眼。
 
-四层修复（缺一层都可能复现）：
+> **补充（本轮复现后定位到的真凶）**：真正被滚走的往往不是 document，而是 **`#phone-container` 自己**。
+> 它同样是 `overflow: hidden`，用户拖不动，但 `input.focus()` / `scrollIntoView()` 照样能改它的 `scrollTop`
+> —— 实测「进出几轮快穿局」后固定残留 **701px**：容器内桌面 / 应用层 / Dock 整体上移 701px，
+> 每个元素自身的高度、位置都正常，`document.scrollTop` 也是 0，所以之前的文档级守卫抓不到。
+> 现在由 `app_layout_guard.js` 把壳层滚动量一起归零，并用 `overflow: clip` 从根上让它不可滚动。
+
+五层修复（缺一层都可能复现）：
 
 | 层 | 位置 | 做法 |
 | --- | --- | --- |
@@ -359,6 +365,21 @@ $ANDROID_HOME/build-tools/34.0.0/apksigner verify -v --min-sdk-version 21 app-re
 | 页面兜底 | `app_native_bridge.js` 的 `installDocumentScrollGuard()` | 在 `scroll` 事件捕获阶段发现文档滚动量 ≠ 0 就立刻归零；`pointerup` / `touchend` / `focusout` / `visualViewport.scroll` 也各兜一层；关闭应用窗口后再复位两次（60ms / 420ms） |
 | 页面布局 | `style.css` | `html { overflow: hidden; overscroll-behavior: none }`；`#phone-container` 加 `justify-content: space-between`；原生壳里 `#desktop { flex: 1 1 auto; min-height: 0 }`，即使桌面异常塌陷 Dock 也贴底 |
 | 原生壳 | `MainActivity` | `webView.setOnScrollChangeListener { ... scrollTo(0, 0) }` 把 WebView 自身滚动量钉死在 0（页面内部容器的滚动完全不受影响）；`setDecorFitsSystemWindows(window, false)` + `windowFullscreen` 让页面铺满整屏；`onConfigurationChanged()` / `onWindowFocusChanged()` 再锁全屏 |
+
+**第五层：布局自愈守卫 `app_layout_guard.js`（新增）**
+
+前三层都是「出问题之前别让它出事」，但真机 ROM 差异太多（输入法顶起、窗口动画、ROM 回传过期 IME inset），所以再加一层**事后自愈**：
+
+| 机制 | 说明 |
+| --- | --- |
+| 触发点 | `openApp()` / `closeApp()`、`resize`、`orientationchange`、`pageshow`、`focusout`、`visualViewport.resize`、`visibilitychange`，每次连探测 5 次（0 / 60 / 240 / 520 / 1200ms），专门等键盘收起和窗口动画结束 |
+| 判定标准 | `phone.top≈0`、`phone.h≈视口高`、`dock.bottom≈视口高`、`doc.scrollTop==0`、`phone.scrollTop==0`、`app-window-container.scrollTop==0`、`body` 无 transform |
+| 修复动作 | ① 文档 / 壳层滚动量归零；② 清掉 `#phone-container` / `#desktop` / `#dock` 上的内联污染（height / flex / transform / margin / position + top..left 偏移）；③ 仍不健康才按视口把高度钉死 |
+| 幂等 | **健康时零写入**；只有判定异常才动手，不会和现有样式互相打架 |
+| 取证 | 控制台 `[StoryLayoutGuard] 布局异常已自愈 (reason)` + `localStorage['story-layout-guard-log']`（保留最近 20 条），`window.StoryLayoutGuard.log()` 直接读 |
+| 附带修复 | 关窗前先 `blur()` 收起软键盘；`closeApp('quicktravel')` 调 `window.teardownQuickTravelApp()` 回收弹幕定时器、document 级拖拽监听、`#qt-toast` / `#qt-overlay` / `qt-game-beautify-css` |
+
+配套的 CSS 加固：`#phone-container` 由 `position: relative` 改为 **`position: fixed; top: 0; left: 0`**（与文档滚动彻底解耦），并加 **`overflow: clip`**（老内核自动回落 `hidden`）。
 
 自检方法（网页版同样适用，浏览器 F12 控制台）：
 
@@ -372,6 +393,16 @@ Math.round(document.getElementById('dock').getBoundingClientRect().bottom) === w
 
 // 3) 桌面主体应该有高度
 document.getElementById('desktop').getBoundingClientRect().height > 100;
+
+// 4) 壳层容器自己也不该有滚动量（真凶就在这儿，document 是 0 也可能是坏的）
+document.getElementById('phone-container').scrollTop;   // 期望 0
+document.getElementById('app-window-container').scrollTop; // 期望 0
+
+// 5) 用守卫视角整体体检：返回 ['problems...']，空数组＝健康
+window.StoryLayoutGuard.problems();
+
+// 6) 看历史自愈记录（真机上排查用，等价 localStorage['story-layout-guard-log']）
+window.StoryLayoutGuard.log();
 ```
 
 ---

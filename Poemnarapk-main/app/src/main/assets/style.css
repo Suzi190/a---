@@ -77,8 +77,22 @@ body {
     radial-gradient(95% 55% at 92% 6%, rgba(255, 255, 255, 0.60) 0%, rgba(255, 255, 255, 0) 62%),
     linear-gradient(180deg, #f6f9fc 0%, #e8eef6 100%);
   background-repeat: no-repeat;
-  position: relative;
+  /* 关键：定格在视口上。页面全是「定高 + 内部容器滚动」布局，用 relative 时
+     一旦文档被程序性滚走（scrollIntoView / 输入框自动上移 / 输入法顶起），
+     整页会跟着一起跑，且再也拖不回来 —— 真机表现就是
+     「Dock 跑到屏幕上方、下方露出大片壁纸/空白」。
+     fixed 之后容器与文档滚动彻底解耦，配合 app_layout_guard.js 的自检兜底。 */
+  position: fixed;
+  top: 0;
+  left: 0;
   overflow: hidden;
+  /* 更彻底的一层：overflow:clip 让容器**完全不可滚动**，
+     连程序性滚动（input.focus / scrollIntoView 把输入框挪进可视区）都无效。
+     只用 hidden 时用户拖不动，但浏览器照样能改 scrollTop，且永远不会自己回 0 ——
+     容器一被滚走 701px，里面的桌面 / 应用层 / Dock 就整体上移，
+     表现正是「Dock 跑到屏幕上方、下方露出大片壁纸」。
+     老内核不支持 clip 会自动回落到上面的 hidden，由 app_layout_guard.js 负责复位。 */
+  overflow: clip;
   display: flex;
   flex-direction: column;
   justify-content: space-between;

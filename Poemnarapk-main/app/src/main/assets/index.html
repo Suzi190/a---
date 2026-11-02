@@ -81,7 +81,10 @@
   </style>
 </head>
 <body>
-  <div id="phone-container" style="position: relative;">
+  <!-- 关键：容器定格在视口上（position:fixed）。页面全是「定高 + 内部滚动」布局，
+       一旦文档被程序性滚走（scrollIntoView / 输入法顶起），relative 会带着整页一起跑，
+       表现就是「Dock 跑到屏幕上方、下方露出大片壁纸/空白」。fixed 后这种情况不可能发生。 -->
+  <div id="phone-container" style="position: fixed; top: 0; left: 0;">
     <!-- 微信/iOS 网页全页面顶层悬浮灵动岛 & 310x340px 大听歌卡片 -->
     <div id="dynamic-island-container" class="collapsed" style="display:none;" onclick="musicSystem.toggleIslandExpand()">
       <!-- 听歌卡片专属毛玻璃弥散背景 -->
@@ -5448,6 +5451,7 @@
   <script src="app_router.js"></script>
 <!-- 原生壳交互桥：返回键/边缘滑动回退、键盘安全滚动、本地通知助手（必须最后加载） -->
 <script src="app_native_bridge.js"></script>
+<script src="app_layout_guard.js"></script>
   <script>
     // 微信展开面板滚动圆点指示器动态触发与点击导航脚本 (零依赖原生驱动)
     document.addEventListener("DOMContentLoaded", () => {
