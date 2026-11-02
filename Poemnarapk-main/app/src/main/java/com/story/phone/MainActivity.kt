@@ -66,7 +66,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // ① 全屏沉浸：隐藏状态栏与导航栏，并保持 adjustResize（键盘弹出时真实缩小可用高度）
+        // ① 全屏：edge-to-edge 铺满整块屏幕（状态栏 / 导航栏 / 挖孔区都不再占位）
         setupFullscreenWindow()
         setContentView(R.layout.activity_main)
 
