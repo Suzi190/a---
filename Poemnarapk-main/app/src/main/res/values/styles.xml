@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 叙事诗全屏沉浸主题：窗体底色统一用 app_bg（#f4f6fa，与网页 bg-main 变量同色），
-         状态栏/导航栏由 MainActivity 沉浸模式统一隐藏；即使被系统临时唤出，
-         露出的也只是与页面同色的浅灰蓝，不再出现刺眼的白色顶条 -->
+    <!-- 叙事诗全屏沉浸主题：
+         windowFullscreen + MainActivity 的 edge-to-edge 让页面真正铺满整块屏幕（含状态栏/挖孔区），
+         app_bg 只是接管动画、转场、系统栏瞬时唤出时的兜底色，不再承担「假装全屏」的职责 -->
     <style name="Theme.StoryPhone" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:windowBackground">@color/app_bg</item>
         <item name="android:colorBackground">@color/app_bg</item>
         <item name="android:windowNoTitle">true</item>
         <item name="windowNoTitle">true</item>
         <item name="windowActionBar">false</item>
+        <!-- 窗口层面直接去掉状态栏占位：content 的可用区域 = 整块屏幕 -->
+        <item name="android:windowFullscreen">true</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

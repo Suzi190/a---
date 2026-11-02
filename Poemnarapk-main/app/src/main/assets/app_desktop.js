@@ -275,10 +275,12 @@ function applyGlobalSettingsOnLoad() {
   }
 
   // 底部 Dock 栏不透明度配置即时拉动渲染
-  const opacity = localStorage.getItem("beautify-dock-opacity") || "70";
+  // 无色磨砂玻璃必须真半透明：超过 45% 就退化成一坨不透明白块，这里做上限钳制
+  const opacityRaw = parseFloat(localStorage.getItem("beautify-dock-opacity") || "30");
+  const opacity = Math.min(isNaN(opacityRaw) ? 30 : opacityRaw, 45) / 100;
   const dockContainer = document.querySelector(".dock-container");
   if (dockContainer) {
-    dockContainer.style.setProperty("background-color", `rgba(255, 255, 255, ${parseFloat(opacity) / 100})`, "important");
+    dockContainer.style.setProperty("background-color", `rgba(255, 255, 255, ${opacity})`, "important");
   }
 
   // 注入式自定义 CSS 预设

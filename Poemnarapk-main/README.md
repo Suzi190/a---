@@ -182,13 +182,15 @@ gradle assembleRelease
 | 能力 | 实现位置 | 说明 |
 | --- | --- | --- |
 | 应用名 | `res/values/strings.xml` | 桌面图标名 = **叙事诗** |
-| 全屏无灰顶栏 | `MainActivity.setupFullscreenWindow()` + `applyImmersiveMode()` + `res/values/styles.xml` | 状态栏与导航栏全隐藏、系统栏颜色透明、窗口底色 = `@color/app_bg`（`#f4f6fa`，与网页 `--bg-main` 同色，挖孔 / 刘海处即使露出也是同色浅灰蓝，不会出现白色条带）、`windowLayoutInDisplayCutoutMode=shortEdges` 铺满挖孔屏；`systemBarsBehavior` 为“滑动临时呼出”，划出后 `installInsetsGuard()` 会自动再收起 |
-| 输入框不被键盘遮挡 | Manifest `windowSoftInputMode="adjustResize"` + `WindowCompat.setDecorFitsSystemWindows(window, true)` | 键盘弹出时 WebView 真实变矮，输入框与底栏随之上移；**不再**使用 `interactive-widget=resizes-content`（与 adjustResize 叠加会把视口压两次，导致整页被顶飞、中间出现大白框） |
+| 真·全屏铺满（含状态栏 / 挖孔区） | `MainActivity.setupFullscreenWindow()` + `applyImmersiveMode()` + `installEdgeToEdgeInsets()` + `res/values/styles.xml` | **不是「给条带染成同色」，而是内容真正铺满整块屏幕**：`android:windowFullscreen` + `WindowCompat.setDecorFitsSystemWindows(window, false)` + `decorView.fitsSystemWindows = false`，DecorView 不再为状态栏 / 导航栏 / 挖孔区预留内边距，页面从第一颗像素画到最后一颗像素；挖孔模式 Android 11+ 用 `ALWAYS`（更低版本 `shortEdges`）；系统栏颜色透明、`systemBarsBehavior` 为「滑动临时呼出」，划出后自动再收起；`@color/app_bg` 只作转场兜底 |
+| 键盘不遮挡、也不顶飞页面 | `MainActivity.installEdgeToEdgeInsets()` | edge-to-edge 下系统不再自动缩窗口：Android 11+ 用 `SOFT_INPUT_ADJUST_NOTHING`，由 IME inset 把 `WebView` 的 `bottomMargin` 抬到键盘上沿（等价 `adjustResize`，但不会整页上移）；Android 8~10 仍走系统 `ADJUST_RESIZE`；**不再**使用 `interactive-widget=resizes-content`（与系统 resize 叠加会把视口压两次） |
 | 边缘滑动返回 | `MainActivity.dispatchTouchEvent()` → `handleBackRequest(true)` | 左边缘右划 / 右边缘左划（贴边 28dp 内起手、水平位移 ≥72dp）触发返回；先回上一页，回不去则静默忽略，**绝不退出 APK**（只有物理返回键才走“再返回一次退出”），所以桌面左右翻页不会误退 |
 | 返回键不误退 | 同 `handleBackRequest()` | 网页侧 `window.__storyNativeBack()` 按「浮层 → 设置二级 → 应用窗口」逐级回退，全部关完才轮到退出确认 |
 | 数据导入导出 | `assets/app_settings.js` + `AndroidMcp.openExportStream()` | 导出统一落到 `Download/Storypoem/`；Android 10+ 走 MediaStore（无需“所有文件访问”权限），Android 9 及以下直写公共下载目录；导入走 HTML5 `<input type="file">`，壳层已做 `createIntent()` 兜底 |
 | 本地通知权限 | `AndroidMcp.requestNotificationPermission()` / `hasNotificationPermission()` / `openNotificationSettings()`，前端 `window.StoryNotify` | Android 13+ 一次性弹出 `POST_NOTIFICATIONS` 运行时授权；被用户关掉时可直接跳到本应用通知设置页；`showSystemNotification()` 发通知前会自动补齐权限 |
-| 真全屏（无顶部白条） | `MainActivity.setupFullscreenWindow()` / `applyImmersiveMode()` / `installInsetsGuard()` + `app_native_bridge.js` 给 `<html>` 打 `story-native-shell` 标记 | 状态栏与导航栏全隐藏、系统栏颜色透明；系统或输入法把状态栏顶回来时立即再隐藏；壳层内把 `env(safe-area-inset-*)` 留白统一归零（`style.css` 里 `html.story-native-shell` 规则），顶部不再出现浅色条带，应用窗口也不会被安全区顶起来 |
+| 系统栏被顶回来自动再隐藏 | `installEdgeToEdgeInsets()` + `applyImmersiveMode()` | `ViewCompat.setOnApplyWindowInsetsListener` 只在系统栏可见时补一次隐藏；系统栏 inset 一律不施加给 `WebView`（否则又会被顶下一截）；`setOnSystemUiVisibilityChangeListener` 兜底老 ROM |
+| 桌面材质：无色磨砂玻璃 | `style.css` 的 `--glass-*` 令牌 + `app_desktop_presets.js` 内置主题 | 真半透明（`rgba(255,255,255,0.2~0.6)` 渐变）+ `backdrop-filter: blur(18~26px) saturate(120%)` + 1px 白色高光边 + 0.5px 中性暗边 + 顶部内高光；图标线稿统一 `#4f5b69` 石墨灰、标签 `#3f4855`，**全程不掺蓝紫**；时光卡顶部条不再叠第二层白底（避免看着像状态栏白带）。内置主题 CSS/组件版本各 +1，老用户升级后自动换新（`syncBuiltinPresetCss` / `syncBuiltinPresetWidgets`） |
+
 | 键盘不顶飞页面 | Manifest `adjustResize` + `installInsetsGuard()` + `app_native_bridge.js` 视口守卫 | 键盘弹出时 WebView 真实变矮 → 底栏随键盘上移；键盘收起后壳层主动 `requestLayout()` 并把文档级滚动量归零、桌面滚动位置还原，不会再出现「整页上移且退不回来」；页面里**不调用** `scrollIntoView`（改用 `window.storyScrollToElement()` 只滚容器），也不再使用 `interactive-widget`，避免二次补偿 |
 | 整页不被程序滚动顶起 | `MainActivity` 把 `WebView` 自身滚动量钉死在 0 + `app_native_bridge.js` 的 `installDocumentScrollGuard()` + `style.css` 里 `html{overflow:hidden}` | `overflow:hidden` 只禁用户手势、**不禁程序滚动**：`scrollIntoView`、输入框自动上移、输入法/系统栏推挤都会改文档级滚动量，一旦被顶起来用户再也拖不回来，真机表现就是「退出快穿局后桌面空白、Dock 跑到屏幕上方、下方一大片底色」。现在文档滚动量只要偏离 0 就会被立刻归零，`Dock` 永远贴底 |
 
@@ -356,7 +358,7 @@ $ANDROID_HOME/build-tools/34.0.0/apksigner verify -v --min-sdk-version 21 app-re
 | 页面调用 | `app_native_bridge.js` 的 `window.storyScrollToElement(el, {block, container})` | 只滚动**最近的滚动容器**，绝不惊动文档；`app_chat_search.js` / `app_moments.js` / `app_music.js` / `app_quicktravel.js` 里原来的 `scrollIntoView` 已全部换掉 |
 | 页面兜底 | `app_native_bridge.js` 的 `installDocumentScrollGuard()` | 在 `scroll` 事件捕获阶段发现文档滚动量 ≠ 0 就立刻归零；`pointerup` / `touchend` / `focusout` / `visualViewport.scroll` 也各兜一层；关闭应用窗口后再复位两次（60ms / 420ms） |
 | 页面布局 | `style.css` | `html { overflow: hidden; overscroll-behavior: none }`；`#phone-container` 加 `justify-content: space-between`；原生壳里 `#desktop { flex: 1 1 auto; min-height: 0 }`，即使桌面异常塌陷 Dock 也贴底 |
-| 原生壳 | `MainActivity` | `webView.setOnScrollChangeListener { ... scrollTo(0, 0) }` 把 WebView 自身滚动量钉死在 0（页面内部容器的滚动完全不受影响）；窗口底 / WebView 底 / 主题 `windowBackground` 统一改成 `@color/app_bg`（`#f4f6fa`）；补充 `windowLayoutInDisplayCutoutMode=shortEdges` 与 `onConfigurationChanged()` 再锁全屏 |
+| 原生壳 | `MainActivity` | `webView.setOnScrollChangeListener { ... scrollTo(0, 0) }` 把 WebView 自身滚动量钉死在 0（页面内部容器的滚动完全不受影响）；`setDecorFitsSystemWindows(window, false)` + `windowFullscreen` 让页面铺满整屏；`onConfigurationChanged()` / `onWindowFocusChanged()` 再锁全屏 |
 
 自检方法（网页版同样适用，浏览器 F12 控制台）：
 
@@ -370,6 +372,46 @@ Math.round(document.getElementById('dock').getBoundingClientRect().bottom) === w
 
 // 3) 桌面主体应该有高度
 document.getElementById('desktop').getBoundingClientRect().height > 100;
+```
+
+---
+
+### 7.7 「全屏」的正确做法 & 桌面材质是「无色磨砂玻璃」（1.3.4）
+
+**① 全屏 ≠ 把条带染成同色。** 1.3.2~1.3.3 只是把 `windowBackground` / WebView 底色改成与页面相同的 `#f4f6fa`，条带还在，只是看着不刺眼而已。真正的铺满必须让 DecorView 不再为系统栏预留空间：
+
+```kotlin
+window.decorView.fitsSystemWindows = false
+WindowCompat.setDecorFitsSystemWindows(window, false)   // 关键
+// Android 11+ 用 LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS，更低版本 SHORT_EDGES
+```
+
+配套 `android:windowFullscreen=true`（`styles.xml`），并在 `installEdgeToEdgeInsets()` 里：
+- **系统栏 inset 一律丢弃**（不给任何 View 加 padding，否则又被顶下一截）；
+- **只把 IME inset 用在 `WebView` 的 `bottomMargin` 上**（Android 11+），等价 `adjustResize` 但不会整页上移；
+- 系统栏可见时补一次 `applyImmersiveMode()` 再隐藏。
+
+页面侧用 `max(12px, env(safe-area-inset-top))` 只给 `#desktop` 让出刘海高度，背景仍通到屏幕最顶端，所以是「铺满 + 内容不被前摄挡住」而不是「留白后染色」。
+
+**② 「无色磨砂玻璃」的含义。** 无色 = 只用白/灰，不掺蓝紫；磨砂 = 半透明 + `backdrop-filter` 模糊背后的壁纸；玻璃 = 有边（1px 白色高光边 + 0.5px 中性暗边 + 顶部内高光）。统一令牌在 `style.css`：
+
+```css
+--glass-fill: linear-gradient(155deg, rgba(255,255,255,.60), rgba(255,255,255,.30) 48%, rgba(255,255,255,.20));
+--glass-blur: blur(20px) saturate(118%);
+--glass-ring: 0 0 0 .5px rgba(15,23,42,.07);
+--glass-ink: #4f5b69;   /* 图标线稿：石墨灰，无彩色 */
+```
+
+应用范围：桌面 App 图标底托、Dock 长条、Dock 图标底托、时光卡（外层卡 + 照片卡 + 日历卡 + 圆形图片位 + 头像）。时光卡的**顶部条不再单独做白底**——外层已经是玻璃，里面再叠一层白卡就会被误读成「顶部白条」。
+
+老用户升级后自动换新，无需重装主题：`BUILTIN_PRESET_CSS_VERSION` / `BUILTIN_PRESET_WIDGET_VERSION` 已各 +1，`syncBuiltinPresetCss()` / `syncBuiltinPresetWidgets()` 会把 localStorage 里的旧 CSS / 旧组件 html 换成新版。
+
+自检（真机 Chrome inspect 或桌面 F12）：
+
+```js
+getComputedStyle(document.querySelector('.app-icon .icon-wrapper')).backdropFilter; // blur(...)
+getComputedStyle(document.querySelector('.dock-container')).backgroundColor;        // rgba(255,255,255,0.3x)
+document.getElementById('phone-container').getBoundingClientRect().top;             // 0
 ```
 
 ---

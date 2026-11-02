@@ -27,6 +27,7 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -75,8 +76,8 @@ class MainActivity : AppCompatActivity() {
         val appBg = ContextCompat.getColor(this, R.color.app_bg)
         webView.setBackgroundColor(appBg)
         webView.overScrollMode = View.OVER_SCROLL_NEVER
-        // ③ 系统栏 / 键盘守卫：状态栏被顶回来就再隐藏；键盘收起时补一次 relayout
-        installInsetsGuard()
+        // ③ 系统栏 / 键盘守卫：edge-to-edge 铺满整屏，键盘只抬 WebView 底边，状态栏被顶回来就再隐藏
+        installEdgeToEdgeInsets()
         // ④ 文档级滚动守卫：本项目页面全部是「固定高度 + 内部容器滚动」布局，
         //    WebView 自身一旦被 scrollIntoView / 输入框自动上移顶起来（overflow:hidden
         //    只禁用户手势、不禁程序滚动），用户就再也拖不回来 —— 真机上表现就是
@@ -257,26 +258,46 @@ class MainActivity : AppCompatActivity() {
     // ==========================================================
 
     private fun setupFullscreenWindow() {
-        // 窗体底色 = 应用主背景色（#f4f6fa，与网页 --bg-main 一致）：
-        // 系统栏 / 挖孔区任何偶发露出的缝隙都与页面同色，不会出现刺眼白色条带
+        // 窗体底色 = 应用主背景色（#f4f6fa，与网页 --bg-main 一致），仅作最后一道兜底
         window.setBackgroundDrawable(ColorDrawable(ContextCompat.getColor(this, R.color.app_bg)))
-        // 系统栏颜色透明：即使被系统 / 输入法临时唤出，也只是透出网页内容，不会出现白底条带
+        // 系统栏颜色透明：系统栏被临时唤出时透出的是网页内容，而不是一条底色
         @Suppress("DEPRECATION")
         run {
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
             window.statusBarColor = Color.TRANSPARENT
             window.navigationBarColor = Color.TRANSPARENT
         }
-        // 允许内容铺满刘海屏 / 挖孔屏，避免顶部出现色块缺口
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val lp = window.attributes
-            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            window.attributes = lp
+        // ★ 真·全屏铺满（不是「给条带染色」）：
+        //   decorFitsSystemWindows = false 让 DecorView 不再为状态栏 / 导航栏 / 挖孔区预留内边距，
+        //   页面从屏幕最顶端第一颗像素一直画到最底端最后一颗像素。
+        //   之前保持 true，系统即使把状态栏隐藏，dec 内容区仍可能被 inset 顶下一截，
+        //   那一截只能是窗体底色 —— 这就是「顶部永远有一条带」的来源。
+        window.decorView.fitsSystemWindows = false
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        // 允许绘制到刘海 / 挖孔区域：Android 11+ 用 ALWAYS 最彻底，老机型退化为 shortEdges
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.attributes = window.attributes.apply {
+                @Suppress("DEPRECATION")
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                @Suppress("DEPRECATION")
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
         }
-        // 关键：decorFitsSystemWindows 保持 true，让 adjustResize 仍然生效，
-        // 键盘弹出时 WebView 真实变矮 → 输入框自动上移，绝不会被键盘遮挡
-        WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        // 键盘策略：
+        //  · Android 11+（edge-to-edge）：系统不再自动缩窗口，改由 installEdgeToEdgeInsets()
+        //    按 IME inset 把 WebView 底边抬到键盘上沿（等价 adjustResize，但不会把整页顶飞）；
+        //  · Android 8~10：仍走系统 ADJUST_RESIZE，真实缩小窗口高度。
+        window.setSoftInputMode(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+            else
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        )
         applyImmersiveMode()
     }
 
@@ -309,16 +330,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 系统栏 / 键盘守卫：
-     * 1) 状态栏或导航栏一旦被系统顶回来，立刻重新隐藏（保证始终是真全屏，不留白条）；
-     * 2) 键盘收起时补一次 relayout，避免 WebView 视口停留在被压缩后的高度（底栏卡在上移位置）。
+     * 边缘到边缘（edge-to-edge）布局守卫：
+     * 1) 状态栏 / 导航栏 / 挖孔区的 inset 一律不施加给 WebView —— 页面从屏幕最顶端画到最底端，
+     *    这是「铺满整屏」和「把条带染成同色」的根本区别；
+     * 2) Android 11+ 系统不再为键盘缩窗口，这里按 IME inset 把 WebView 底边抬到键盘上沿，
+     *    效果等同 adjustResize：输入框自动上移、整页不会被顶飞；
+     * 3) 状态栏 / 导航栏一旦被系统重新显示，立刻再隐藏；
+     * 4) 键盘收起时补一次 relayout，避免视口停留在被压缩高度（底栏卡在上移位置）。
      */
-    private fun installInsetsGuard() {
+    private fun installEdgeToEdgeInsets() {
         ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { view, insets ->
             val systemBarsVisible = insets.isVisible(WindowInsetsCompat.Type.statusBars()) ||
                 insets.isVisible(WindowInsetsCompat.Type.navigationBars())
             if (systemBarsVisible) view.post { applyImmersiveMode() }
-            ViewCompat.onApplyWindowInsets(view, insets)
+
+            if (::webView.isInitialized) {
+                // 只处理键盘：系统栏 inset 全部丢弃，WebView 才能铺满整屏
+                val imeBottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    insets.getInsets(WindowInsetsCompat.Type.ime()).bottom else 0
+                val lp = webView.layoutParams
+                if (lp is ViewGroup.MarginLayoutParams && lp.bottomMargin != imeBottom) {
+                    lp.bottomMargin = imeBottom
+                    webView.layoutParams = lp
+                }
+                webView.fitsSystemWindows = false
+            }
+            insets
         }
 
         // 老系统 / 部分 ROM 只会回调 legacy 的 systemUiVisibility 变化，这里再兜一层

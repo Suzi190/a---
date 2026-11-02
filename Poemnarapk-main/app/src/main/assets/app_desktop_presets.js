@@ -483,14 +483,16 @@ window.DESKTOP_PRESETS = {
   border-radius: 22px !important;
 }
 
-/* App 图标：圆形磨砂玻璃圆盘 + 浅灰细线图标（开源 Lucide 图标集） */
+/* App 图标：圆形无色磨砂玻璃圆盘 + 中性灰细线图标（开源 Lucide 图标集） */
 .app-icon .icon-wrapper {
-  background: rgba(255, 255, 255, 0.66) !important;
-  border: 1px solid rgba(255, 255, 255, 0.92) !important;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.58) 0%, rgba(255, 255, 255, 0.26) 52%, rgba(255, 255, 255, 0.18) 100%) !important;
+  background-color: rgba(255, 255, 255, 0.30) !important;
+  border: 1px solid rgba(255, 255, 255, 0.70) !important;
   border-radius: 50% !important;
-  box-shadow: 0 6px 16px rgba(122, 126, 132, 0.16), inset 0 1px 1px rgba(255, 255, 255, 0.92) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
+  box-shadow: 0 0 0 0.5px rgba(15, 23, 42, 0.07), 0 10px 24px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.90), inset 0 -1px 0 rgba(15, 23, 42, 0.05) !important;
+  backdrop-filter: blur(18px) saturate(120%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(120%) !important;
+  color: #4f5b69 !important;
   overflow: hidden !important;
 }
 /* 桌面：圆形圆盘上限 52px（原 58px 方盘偏大），窄屏按槽位高度自动收缩，绝不撑破 4×7 网格。
@@ -501,18 +503,21 @@ window.DESKTOP_PRESETS = {
   max-width: 100% !important;
   aspect-ratio: 1 / 1 !important;
   border-radius: 50% !important;
-  background: rgba(255, 255, 255, 0.66) !important;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.58) 0%, rgba(255, 255, 255, 0.26) 52%, rgba(255, 255, 255, 0.18) 100%) !important;
+  background-color: rgba(255, 255, 255, 0.30) !important;
 }
 /* Dock：4 个圆盘统一 50px，比桌面略小一圈更精致 */
 #dock-grid .app-icon .icon-wrapper {
   width: 50px !important;
   height: 50px !important;
   border-radius: 50% !important;
-  background: rgba(255, 255, 255, 0.66) !important;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0.22) 100%) !important;
+  background-color: rgba(255, 255, 255, 0.26) !important;
 }
-/* 图标线稿：内缩留白加大（视觉更小巧），统一浅灰色 */
+/* 图标线稿：内缩留白加大（视觉更小巧），统一中性石墨灰 —— 无色，不描蓝紫 */
 .app-icon .icon-wrapper svg {
-  color: #9aa5b1 !important;
+  color: #4f5b69 !important;
+  stroke: currentColor !important;
   filter: none !important;
 }
 /* 桌面/Dock 的 svg 尺寸需要压过 app_desktop.js 里的 padding:15% 默认值 */
@@ -531,24 +536,26 @@ window.DESKTOP_PRESETS = {
   font-size: 11px !important;
   font-weight: 600 !important;
   letter-spacing: 0.4px !important;
-  color: #5f6469 !important;
-  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9) !important;
+  color: #3f4855 !important;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.85) !important;
 }
 
-/* Dock 栏：圆形水晶玻璃条 */
+/* Dock 栏：无色磨砂玻璃长条（半透明 + 背景模糊 + 顶部高光边） */
 .dock-container {
-  background-color: rgba(255, 255, 255, 0.34) !important;
-  backdrop-filter: blur(26px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(26px) saturate(180%) !important;
-  border: 1.5px solid rgba(255, 255, 255, 0.85) !important;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.62) 0%, rgba(255, 255, 255, 0.30) 52%, rgba(255, 255, 255, 0.22) 100%) !important;
+  background-color: rgba(255, 255, 255, 0.28) !important;
+  backdrop-filter: blur(26px) saturate(120%) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(120%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.66) !important;
   border-radius: 34px !important;
-  box-shadow: 0 16px 36px rgba(122, 126, 132, 0.20), inset 0 1px 2px rgba(255, 255, 255, 0.9) !important;
+  box-shadow: 0 0 0 0.5px rgba(15, 23, 42, 0.07), 0 16px 34px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.90) !important;
 }
 .dock-container .icon-wrapper {
-  background: rgba(255, 255, 255, 0.66) !important;
-  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0.22) 100%) !important;
+  background-color: rgba(255, 255, 255, 0.24) !important;
+  border: 1px solid rgba(255, 255, 255, 0.70) !important;
   border-radius: 50% !important;
-  box-shadow: 0 4px 12px rgba(122, 126, 132, 0.16) !important;
+  box-shadow: 0 0 0 0.5px rgba(15, 23, 42, 0.06), 0 6px 16px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
 }
 
 /* 翻页指示器 */
@@ -580,11 +587,22 @@ window.DESKTOP_PRESETS = {
   font-weight: 700;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
 }
-/* 顶部条 / 照片卡 / 日历卡：统一无色磨砂白卡质感 */
+/* 顶部条 / 照片卡 / 日历卡：统一无色磨砂玻璃（半透明 + 背景模糊 + 顶部高光边） */
 #bg-hero #bg-topbar, #bg-hero #bg-photo, #bg-hero #bg-cal {
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.86);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.46) 0%, rgba(255, 255, 255, 0.22) 55%, rgba(255, 255, 255, 0.14) 100%);
+  backdrop-filter: blur(14px) saturate(115%);
+  -webkit-backdrop-filter: blur(14px) saturate(115%);
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  box-shadow: 0 0 0 0.5px rgba(15, 23, 42, 0.06), 0 8px 20px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+}
+/* 顶部条不再做「第二个白条」：外层卡片已经是玻璃，内层再叠一层白底只会像状态栏白带。
+   头像 + 时间直接浮在玻璃上，靠头像的磨砂圆盘提供层次。 */
+#bg-hero #bg-topbar {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 /* 中部两卡：占位层撑出高度，内层绝对定位放两张等宽卡片（左右各一） */
 #bg-hero #bg-mid { width: 100%; position: relative; }
@@ -604,9 +622,11 @@ window.DESKTOP_PRESETS = {
   flex: 0 0 auto;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(255, 255, 255, 0.66);
-  border: 1.5px solid rgba(255, 255, 255, 0.95);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.50) 0%, rgba(255, 255, 255, 0.20) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  box-shadow: 0 0 0 0.5px rgba(15, 23, 42, 0.06), 0 6px 16px rgba(15, 23, 42, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+  backdrop-filter: blur(12px) saturate(115%);
+  -webkit-backdrop-filter: blur(12px) saturate(115%);
   transition: transform .16s ease;
 }
 #bg-hero .bg-orb:active { transform: scale(0.94); }
@@ -652,11 +672,11 @@ window.DESKTOP_PRESETS = {
   #bg-hero #bg-cal-grid { font-size: 7px !important; }
 }
 </style>
-<div id="bg-hero" style="width:100%; height:100%; box-sizing:border-box; padding:12px 12px 12px 12px; display:flex; flex-direction:column; justify-content:space-between; gap:8px; border-radius:22px; background:linear-gradient(158deg, rgba(255,255,255,0.64) 0%, rgba(255,255,255,0.44) 52%, rgba(255,255,255,0.34) 100%); backdrop-filter:blur(26px) saturate(8%); -webkit-backdrop-filter:blur(26px) saturate(8%); border:1px solid rgba(255,255,255,0.74); box-shadow:0 18px 40px rgba(0,0,0,0.10), inset 0 1px 1px rgba(255,255,255,0.85); overflow:hidden; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; user-select:none; -webkit-user-select:none;">
+<div id="bg-hero" style="width:100%; height:100%; box-sizing:border-box; padding:12px 12px 12px 12px; display:flex; flex-direction:column; justify-content:space-between; gap:8px; border-radius:22px; background:linear-gradient(155deg, rgba(255,255,255,0.44) 0%, rgba(255,255,255,0.20) 50%, rgba(255,255,255,0.10) 100%); backdrop-filter:blur(26px) saturate(118%); -webkit-backdrop-filter:blur(26px) saturate(118%); border:1px solid rgba(255,255,255,0.58); box-shadow:0 0 0 0.5px rgba(15,23,42,0.06), 0 18px 40px rgba(15,23,42,0.10), inset 0 1px 0 rgba(255,255,255,0.82); overflow:hidden; position:relative; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; user-select:none; -webkit-user-select:none;">
   <!-- 顶部条：头像 + 大号时间（白色玻璃横条） -->
   <div id="bg-topbar" style="flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:16px 16px; border-radius:18px;">
     <input type="file" id="bg-avatar-input" accept="image/*" style="display:none;">
-    <div id="bg-avatar" title="点击更换头像" style="width:clamp(38px,12.8vw,50px); height:clamp(38px,12.8vw,50px); flex:0 0 auto; border-radius:50%; overflow:hidden; background:rgba(255,255,255,0.92); border:1.5px solid rgba(255,255,255,0.96); box-shadow:0 4px 12px rgba(0,0,0,0.1); display:flex; align-items:center; justify-content:center; cursor:pointer;">
+    <div id="bg-avatar" title="点击更换头像" style="width:clamp(38px,12.8vw,50px); height:clamp(38px,12.8vw,50px); flex:0 0 auto; border-radius:50%; overflow:hidden; background:linear-gradient(155deg, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.30) 100%); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.80); box-shadow:0 4px 12px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.85); display:flex; align-items:center; justify-content:center; cursor:pointer;">
       <img id="bg-avatar-img" alt="" style="display:none; width:100%; height:100%; object-fit:cover;">
       <svg id="bg-avatar-svg" viewBox="0 0 64 64" style="width:82%; height:82%; display:block;">
         <defs>
@@ -687,7 +707,7 @@ window.DESKTOP_PRESETS = {
     <div class="bg-mid-spacer" aria-hidden="true"></div>
     <div id="bg-mid-grid">
       <input type="file" id="bg-photo-input" accept="image/*" style="display:none;">
-      <div id="bg-photo" title="点击更换照片" style="min-width:0; min-height:0; border-radius:16px; overflow:hidden; background-color:#ededed; background-size:cover; background-position:center; background-repeat:no-repeat; cursor:pointer;"></div>
+      <div id="bg-photo" title="点击更换照片" style="min-width:0; min-height:0; border-radius:16px; overflow:hidden; background-color:rgba(255,255,255,0.28); background-size:cover; background-position:center; background-repeat:no-repeat; cursor:pointer;"></div>
       <div id="bg-cal" style="min-width:0; min-height:0; border-radius:16px; padding:7px 8px 6px 8px; display:flex; flex-direction:column; overflow:hidden;">
         <div style="flex:0 0 auto; display:flex; align-items:baseline; justify-content:space-between; padding:0 2px 4px 2px;">
           <div id="bg-cal-month" style="font-size:clamp(12px,3.6vw,16px); font-weight:700; color:rgba(58,58,58,0.92);">10 月</div>
@@ -1130,7 +1150,7 @@ window.ensureDefaultDesktopTheme = function() {
 // 用户自己在设置里写的自定义 CSS 不含预设签名，不会被误伤。
 // ⚠️ 以后每次修改内置主题样式，都要把 BUILTIN_PRESET_CSS_VERSION +1。
 // ============================================================
-const BUILTIN_PRESET_CSS_VERSION = 3;
+const BUILTIN_PRESET_CSS_VERSION = 4;
 const BUILTIN_PRESET_CSS_VERSION_KEY = "beautify-builtin-css-version";
 
 window.syncBuiltinPresetCss = function() {
@@ -1179,7 +1199,7 @@ window.syncBuiltinPresetCss = function() {
 // 用户从零重写的组件不含该标记 → 原样保留，非内置组件（自定义 id）完全不受影响。
 // ⚠️ 以后每次调整内置组件的尺寸或 html，都要把 BUILTIN_PRESET_WIDGET_VERSION +1。
 // ============================================================
-const BUILTIN_PRESET_WIDGET_VERSION = 4;
+const BUILTIN_PRESET_WIDGET_VERSION = 5;
 const BUILTIN_PRESET_WIDGET_VERSION_KEY = "beautify-builtin-widget-version";
 
 // 取内置 html 里第一个 id="xxx" 作为「这是内置原版」的指纹
