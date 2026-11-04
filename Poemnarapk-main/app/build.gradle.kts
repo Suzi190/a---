@@ -11,8 +11,8 @@ android {
         applicationId = "com.story.phone"
         minSdk = 26 // 安卓 8.0，保障完美兼容通知监听、硬件马达与无障碍接口
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.3.5"
+        versionCode = 11
+        versionName = "1.3.6"
 
         // ★ 体积优化：只打包真机 ABI。
         //   onnxruntime 的 x86 / x86_64 两个 .so 合计约 78MB，只在模拟器里用得上，

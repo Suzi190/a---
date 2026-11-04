@@ -13,7 +13,9 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.provider.Settings
+import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.media.MediaPlayer
 import android.util.Log
@@ -60,6 +62,82 @@ class AndroidMcp(private val context: Context) {
                 }
             }
         }
+    }
+
+    // ===== 文件选择器兜底读取 =====
+    // 老 Android WebView 读 content:// URI 时可能既不成功也不报错（FileReader 永久挂起），
+    // 表现为「选完文件毫无反应」。这里由原生用 ContentResolver 直接读字节，供 JS 兜底调用。
+    private var pickedUris: List<Uri> = emptyList()
+    private var pickedBytes: ByteArray? = null
+
+    /** 记录最近一次 input[type=file] 回传的 URI（MainActivity.onActivityResult 调用） */
+    fun rememberPickedUris(uris: List<Uri>) {
+        pickedUris = uris
+        pickedBytes = null
+        Log.i(TAG, "rememberPickedUris() size=${uris.size}")
+    }
+
+    /** JS 诊断日志 → logcat（tag=WebViewDiag），真机排查用 */
+    @JavascriptInterface
+    fun logDebug(message: String) {
+        Log.i("WebViewDiag", message)
+    }
+
+    @JavascriptInterface
+    fun pickedFileCount(): Int = pickedUris.size
+
+    @JavascriptInterface
+    fun pickedFileName(index: Int): String {
+        val uri = pickedUris.getOrNull(index) ?: return ""
+        return queryDisplayName(uri) ?: uri.lastPathSegment ?: ""
+    }
+
+    /** 打开第 index 个已选文件，返回字节数（0 = 失败） */
+    @JavascriptInterface
+    fun openPickedFile(index: Int): Int {
+        val uri = pickedUris.getOrNull(index)
+        if (uri == null) {
+            Log.e(TAG, "openPickedFile($index) 越界，共 ${pickedUris.size} 个")
+            return 0
+        }
+        return try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            if (bytes.size > 64 * 1024 * 1024) {
+                Log.e(TAG, "openPickedFile($index) 文件过大: ${bytes.size} 字节")
+                pickedBytes = null
+                return 0
+            }
+            pickedBytes = bytes
+            val name = queryDisplayName(uri) ?: uri.lastPathSegment ?: ""
+            Log.i(TAG, "openPickedFile($index) -> ${bytes.size} 字节, name=$name")
+            bytes.size
+        } catch (e: Exception) {
+            Log.e(TAG, "openPickedFile($index) 失败: ${e.message}", e)
+            pickedBytes = null
+            0
+        }
+    }
+
+    /** 分块返回 base64，避免一次传几 MB 字符串 */
+    @JavascriptInterface
+    fun readPickedFileChunk(offset: Int, length: Int): String {
+        val data = pickedBytes ?: return ""
+        if (offset < 0 || length <= 0 || offset >= data.size) return ""
+        val end = minOf(offset + length, data.size)
+        return Base64.encodeToString(data, offset, end - offset, Base64.NO_WRAP)
+    }
+
+    @JavascriptInterface
+    fun closePickedFile() {
+        pickedBytes = null
+    }
+
+    private fun queryDisplayName(uri: Uri): String? = try {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getString(0) else null
+        }
+    } catch (e: Exception) {
+        null
     }
 
     @JavascriptInterface

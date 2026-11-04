@@ -53,7 +53,7 @@ class ModernFile extends LegacyFile {
   text() { return Promise.resolve(this._bytes.toString('utf8')); }
 }
 
-function makeSandbox({ modern }) {
+function makeSandbox({ modern, fileReader }) {
   const sb = {
     console,
     setTimeout,
@@ -65,7 +65,7 @@ function makeSandbox({ modern }) {
     // 老/新 WebView 都有 atob/btoa（base64 解卡必需），vm 沙箱默认没有，这里补上
     atob: (s) => atob(s),
     btoa: (s) => btoa(s),
-    FileReader: StubFileReader,
+    FileReader: fileReader || StubFileReader,
     // DOM 占位：本测试只关心纯逻辑函数，页面元素一律返回 null
     document: {
       getElementById: () => null,
@@ -346,6 +346,86 @@ if (typeof DecompressionStream === 'function') {
 } else {
   console.log('  skip 当前 Node 没有 DecompressionStream');
 }
+
+// ---------- 8. 真机「零反应」防护：超时 + 安卓壳层兜底 ----------
+console.log('\n[8] 超时保护 / 安卓壳层兜底读取');
+
+// 老 WebView 读 content:// 最坏的形态：FileReader 既不 onload 也不 onerror（永久挂起）
+class HangingFileReader {
+  readAsArrayBuffer() { /* 永不回调，模拟挂死 */ }
+  readAsDataURL() { /* 永不回调 */ }
+  readAsText() { /* 永不回调 */ }
+}
+class FailingFileReader {
+  readAsArrayBuffer() {
+    setTimeout(() => {
+      this.error = new Error('NotReadableError: content:// 读取失败');
+      if (this.onerror) this.onerror();
+    }, 0);
+  }
+}
+
+const hangCtx = load(makeSandbox({ modern: false, fileReader: HangingFileReader }));
+vm.runInContext('ST_READ_TIMEOUT_MS = 200;', hangCtx);
+assert.equal(vm.runInContext('ST_READ_TIMEOUT_MS', hangCtx), 200, '测试无法缩短超时时间');
+
+await checkAsync('stWithTimeout 正常透传结果', async () => {
+  assert.equal(await legacy.stWithTimeout(Promise.resolve(42), 1000, '测试'), 42);
+});
+await checkAsync('stWithTimeout 到点必失败（不会永久挂起）', async () => {
+  await assert.rejects(legacy.stWithTimeout(new Promise(() => {}), 120, '测试'), /超时/);
+});
+
+await checkAsync('FileReader 挂死时按超时报错，而不是一直等', async () => {
+  await assert.rejects(
+    hangCtx.stReadFileAsArrayBuffer(new LegacyFile('card.png', 'image/png', plainPng), 0),
+    /超时/
+  );
+});
+
+await checkAsync('FileReader 挂死 + 安卓壳层可用 → 改用原生读取并成功建草稿', async () => {
+  const stub = {
+    openPickedFile(index) { return index === 0 ? plainPng.length : 0; },
+    readPickedFileChunk(offset, len) {
+      return Buffer.from(plainPng.slice(offset, offset + len)).toString('base64');
+    },
+    closePickedFile() {},
+    logDebug() {}
+  };
+  hangCtx.window.AndroidMCP = stub;
+  try {
+    const bytes = await hangCtx.stReadFileAsArrayBuffer(new LegacyFile('卡片', '', plainPng), 0);
+    assert.equal(bytes.byteLength, plainPng.length);
+    const draft = await hangCtx.stBuildImportDraft([new LegacyFile('卡片', '', plainPng)]);
+    assert.equal(draft.cards[0].card.name, '兼容测试角色');
+    assert.equal(draft.allEntries, 1);
+  } finally {
+    delete hangCtx.window.AndroidMCP;
+  }
+});
+
+const failCtx = load(makeSandbox({ modern: false, fileReader: FailingFileReader }));
+vm.runInContext('ST_READ_TIMEOUT_MS = 2000;', failCtx);
+await checkAsync('读取报错时把真实原因带回界面（不再静默失败）', async () => {
+  await assert.rejects(
+    failCtx.stReadFileAsArrayBuffer(new LegacyFile('card.png', 'image/png', plainPng), 0),
+    /NotReadableError/
+  );
+  await assert.rejects(
+    failCtx.stBuildImportDraft([new LegacyFile('card.png', 'image/png', plainPng)]),
+    /读取失败/
+  );
+});
+
+check('环境信息包含引擎版本与兜底状态（真机排查用）', () => {
+  const info = legacy.stEnvInfo();
+  assert.match(info, /引擎：/);
+  assert.match(info, /DecompressionStream：/);
+  assert.match(info, /安卓壳层读文件兜底：不可用/);
+});
+check('没有可用 DOM 时诊断浮层静默降级、不抛异常', () => {
+  assert.equal(legacy.stShowDiag({ title: 'x', detail: 'y' }), false);
+});
 
 // ---------- 汇总 ----------
 console.log('\n============================');

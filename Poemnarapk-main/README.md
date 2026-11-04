@@ -464,8 +464,8 @@ document.getElementById('phone-container').getBoundingClientRect().top;         
 修法（`app_archive.js`）：
 
 ```js
-// 1) 读文件统一走 FileReader，file.arrayBuffer() 只当作可选快路径
-function stReadFileAsArrayBuffer(file) { /* arrayBuffer() → 失败/不存在则 readAsArrayBuffer */ }
+// 1) 读文件统一走 FileReader（全版本可用），外面再包一层超时防「挂死」
+async function stReadFileAsArrayBuffer(file, fileIndex) { /* FileReader + 超时 + 原生兜底 */ }
 
 // 2) 文本用字节解码：有 TextDecoder 用它，没有就 decodeURIComponent(escape(bin))
 function stDecodeUtf8Text(bytes) { /* ... */ }
@@ -482,11 +482,43 @@ async function stInflateDeflate(bytes) { /* 原生 → 失败则 stInflateZlib()
 回归测试（不需要真机）：
 
 ```bash
-node tools/st-inflate-test.mjs   # 在「无 DecompressionStream / 无 Blob.arrayBuffer」的 vm 沙箱里跑 51 项
+node tools/st-inflate-test.mjs   # 在「无 DecompressionStream / 无 Blob.arrayBuffer」的 vm 沙箱里跑 58 项
 node tools/st-import-test.mjs    # 无头 Edge：真实 input[type=file] → 解析 → 预览 → 落库
 ```
 
 > 经验：写进 `app/src/main/assets` 的前端代码，只要用到 2019 年之后新增的 Web API，就要准备降级路径或自实现兜底——桌面浏览器测不出来，老安卓 WebView 会直接白给。
+
+### 7.9 「还是没反应」——挂死型失败与三层兜底（1.3.6）
+
+1.3.5 补齐了 API 兼容后，仍有老机型「选完文件毫无变化、连提示都看不到」。原因有两类，都不是解析逻辑：
+
+1. **挂死型失败**：老 WebView 读文件选择器回传的 `content://` URI 时，有时 `FileReader` 既不 `onload` 也不 `onerror`，Promise 永远不 settle——报错提示自然永远等不到。同理旧版 `compressImageBlob()` 只写了 `onload`，读失败就永久挂住。
+2. **反馈通道不可靠**：旧版失败只弹 Toast，壳层里 Toast 容器被遮住/未加载时用户就什么都看不到。
+
+1.3.6 的修法（全部在 `app_archive.js` + `AndroidMcp.kt` + `MainActivity.kt`）：
+
+| 层 | 做法 |
+| --- | --- |
+| 超时 | `stWithTimeout()` 包住「读文件 15s / 解析 PNG 20s / 头像压缩 6s / 整体 60s」，到点必报错，绝不死等 |
+| 原生兜底 | `MainActivity.onActivityResult` 先把 URI 交给 `AndroidMcp.rememberPickedUris()`；JS 读不到（报错或超时）就调 `openPickedFile()` / `readPickedFileChunk()`，由原生 `ContentResolver` 直接读字节（192KB 分块 base64 回传），绕过 WebView 对 `content://` 的限制 |
+| 可见反馈 | 自建内联样式诊断浮层（`z-index: 2147483647`），显示「正在解析角色卡…」→ 成功自动关闭 / 失败列出**诊断记录 + 环境摘要**（Chromium 版本、是否有 `File.arrayBuffer` / `DecompressionStream` / `TextDecoder`、原生兜底是否可用），带「重试」按钮 |
+| 看门狗 | 点导入后若壳层根本没把文件回传到网页（`onShowFileChooser` 回调丢失），JS 侧在页面重新可见 6s 后提示「没有收到文件」；Kotlin 侧 `onResume` 3s 后仍在挂着的 `fileUploadCallback` 会主动回传 `null` 解除占用（否则之后再点任何文件按钮都没反应） |
+| 日志 | JS 每步写 `console` + `AndroidMCP.logDebug()`（logcat `WebViewDiag`）；`onConsoleMessage` 把 JS 报错转发到 logcat `WebViewConsole`；文件选择器结果记在 `FileChooser` |
+
+真机排查命令：
+
+```bash
+adb logcat -s WebViewDiag WebViewConsole FileChooser AndroidMcp
+```
+
+回归测试：
+
+```bash
+node tools/st-inflate-test.mjs   # 58 项，含「FileReader 挂死 → 超时报错」「挂死 + 原生兜底 → 仍能导入」
+node tools/st-import-test.mjs    # 无头 Edge：真实 input[type=file] → 解析 → 预览 → 落库
+```
+
+> 经验：跨 WebView 兼容问题，「一定会失败」比「一定会报错」更难查。给每个异步步骤加上限，比继续猜 API 差异有效得多；再叠加一条不走 WebView 的原生兜底路径，基本可以吃掉各类文件管理器/URI 权限的怪癖。
 
 ---
 

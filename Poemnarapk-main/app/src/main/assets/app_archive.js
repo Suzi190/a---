@@ -941,6 +941,11 @@ function compressImageBlob(file, maxDim = 150, quality = 0.8) {
     reader.onload = (e) => {
       img.src = e.target.result;
     };
+    // ★ 必须给 onerror：老 WebView 读 content:// 失败时若只有 onload，这个 Promise 永远不结束，
+    //   调用方（角色卡导入 / 头像上传）就会一直卡住，表现为「点了没反应」。
+    reader.onerror = () => {
+      resolve(file);
+    };
     reader.readAsDataURL(file);
   });
 }
@@ -1198,34 +1203,225 @@ function stInflateRaw(data) {
   return out.subarray(0, outLen);
 }
 
+// ============================================================================
+// 真机诊断 + 超时保护 + 安卓壳层兜底读文件
+// ----------------------------------------------------------------------------
+// 老 Android WebView 读「文件选择器回传的 content:// URI」时，最坏的形态不是报错，
+// 而是 FileReader 既不 onload 也不 onerror —— 永久挂起。页面上看到的就是
+// 「选完文件，一点反应都没有」，连错误提示都等不到。
+// 所以这里四件事一起做：
+//   ① 每一步都写诊断日志（页面 console + logcat，tag=WebViewDiag）
+//   ② 每个异步步骤都有超时，挂住就报错，绝不死等
+//   ③ 读不到就调安卓壳层（AndroidMCP）直接读文件，绕过 WebView 的 content:// 限制
+//   ④ 任何结果都显示在屏幕上（不依赖 Toast 是否可见）
+// ============================================================================
+let ST_READ_TIMEOUT_MS = 15000;   // 读单个文件
+let ST_PARSE_TIMEOUT_MS = 20000;  // 解析 PNG / 解压内嵌 JSON
+let ST_AVATAR_TIMEOUT_MS = 6000;  // 头像压缩（失败可放弃，不影响导入）
+
+const stDiagLog = [];
+function stDiag(step, extra) {
+  const line = `${step}${extra ? ' · ' + extra : ''}`;
+  stDiagLog.push(line);
+  if (stDiagLog.length > 40) stDiagLog.shift();
+  try { console.log('[ST导入] ' + line); } catch (e) { /* 忽略 */ }
+  try {
+    if (window.AndroidMCP && typeof window.AndroidMCP.logDebug === 'function') {
+      window.AndroidMCP.logDebug('ST导入 ' + line);
+    }
+  } catch (e) { /* 忽略 */ }
+}
+
+// 给任意 Promise 加超时：老 WebView 会「不成功也不失败」，必须设上限
+function stWithTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`${label}超时（${Math.round(ms / 1000)} 秒无响应）`));
+    }, ms);
+    Promise.resolve(promise).then((value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    }, (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+// 安卓壳层读文件桥（MainActivity 里 addJavascriptInterface 注入的 AndroidMCP）
+function stNativeBridge() {
+  let api = null;
+  try { api = (typeof window !== 'undefined' && window.AndroidMCP) ? window.AndroidMCP : null; } catch (e) { api = null; }
+  if (!api) return null;
+  if (typeof api.openPickedFile !== 'function' || typeof api.readPickedFileChunk !== 'function') return null;
+  return api;
+}
+
+// 运行环境摘要（用户反馈问题时直接显示，省得反复猜 WebView 版本）
+function stEnvInfo() {
+  let ua = '';
+  try { ua = navigator.userAgent || ''; } catch (e) { ua = ''; }
+  const m = ua.match(/Chrome\/(\d+)/);
+  const hasArrayBuffer = typeof File !== 'undefined' && typeof File.prototype.arrayBuffer === 'function';
+  const hasDS = typeof DecompressionStream === 'function';
+  const hasTD = typeof TextDecoder === 'function';
+  return [
+    `引擎：${m ? 'Chromium ' + m[1] : (ua ? ua.slice(0, 60) : '未知')}`,
+    `File.arrayBuffer：${hasArrayBuffer ? '有' : '无（走 FileReader）'}`,
+    `DecompressionStream：${hasDS ? '有' : '无（走内置解压）'}`,
+    `TextDecoder：${hasTD ? '有' : '无（走 escape 兜底）'}`,
+    `安卓壳层读文件兜底：${stNativeBridge() ? '可用' : '不可用'}`
+  ].join('\n');
+}
+
+function stBase64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// 安卓壳层直接读刚选中的文件：ContentResolver 不受 WebView content:// 读取限制
+function stReadPickedFileViaNative(index) {
+  const api = stNativeBridge();
+  if (!api) throw new Error('安卓壳层兜底读取不可用');
+  let size = 0;
+  try { size = Number(api.openPickedFile(index)) || 0; } catch (e) {
+    throw new Error('安卓壳层读取失败：' + ((e && e.message) || e));
+  }
+  if (!size) throw new Error('安卓壳层读到的文件是空的');
+  const CHUNK = 192 * 1024;
+  const parts = [];
+  let total = 0;
+  try {
+    for (let offset = 0; offset < size; offset += CHUNK) {
+      const len = Math.min(CHUNK, size - offset);
+      const b64 = api.readPickedFileChunk(offset, len);
+      if (!b64) throw new Error('安卓壳层读取中断');
+      const part = stBase64ToBytes(b64);
+      parts.push(part);
+      total += part.length;
+    }
+  } finally {
+    try { if (typeof api.closePickedFile === 'function') api.closePickedFile(); } catch (e) { /* 忽略 */ }
+  }
+  const out = new Uint8Array(total);
+  let pos = 0;
+  for (let i = 0; i < parts.length; i++) {
+    out.set(parts[i], pos);
+    pos += parts[i].length;
+  }
+  return out;
+}
+
+// 诊断浮层：内联样式自建，不依赖主题/CSS，保证一定看得见
+let stDiagEl = null;
+function stEnsureDiagEl() {
+  if (stDiagEl) return stDiagEl;
+  try {
+    const el = document.createElement('div');
+    el.id = 'st-diag-overlay';
+    el.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483647;display:none;' +
+      'align-items:center;justify-content:center;background:rgba(15,23,42,.45);padding:18px;' +
+      '-webkit-box-sizing:border-box;box-sizing:border-box;';
+    el.innerHTML =
+      '<div style="width:100%;max-width:420px;max-height:82%;display:flex;flex-direction:column;background:#fff;' +
+      'border-radius:16px;padding:16px 16px 12px;box-sizing:border-box;box-shadow:0 18px 40px rgba(15,23,42,.25);">' +
+        '<div id="st-diag-title" style="font-size:15px;font-weight:600;margin-bottom:8px;color:#1f2937;">正在解析角色卡…</div>' +
+        '<div id="st-diag-body" style="font-size:12px;line-height:1.7;color:#4b5563;white-space:pre-wrap;' +
+        'overflow-y:auto;-webkit-overflow-scrolling:touch;max-height:50vh;word-break:break-all;"></div>' +
+        '<div style="display:flex;gap:8px;margin-top:12px;">' +
+          '<button type="button" id="st-diag-retry" style="display:none;flex:1;padding:9px 0;border-radius:10px;' +
+          'border:none;background:#07c160;color:#fff;font-size:13px;">重试</button>' +
+          '<button type="button" id="st-diag-close" style="display:none;flex:1;padding:9px 0;border-radius:10px;' +
+          'border:1px solid #d1d5db;background:#fff;color:#374151;font-size:13px;">关闭</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    stDiagEl = el;
+    return el;
+  } catch (e) {
+    return null;
+  }
+}
+
+function stShowDiag(opts) {
+  const el = stEnsureDiagEl();
+  if (!el) return false;
+  try {
+    const title = el.querySelector('#st-diag-title');
+    const body = el.querySelector('#st-diag-body');
+    const retryBtn = el.querySelector('#st-diag-retry');
+    const closeBtn = el.querySelector('#st-diag-close');
+    if (title) title.textContent = opts.title || '';
+    if (body) body.textContent = opts.detail || '';
+    if (retryBtn) {
+      retryBtn.style.display = opts.onRetry ? 'block' : 'none';
+      retryBtn.onclick = opts.onRetry ? () => { stHideDiag(); opts.onRetry(); } : null;
+    }
+    if (closeBtn) {
+      closeBtn.style.display = opts.closable === false ? 'none' : 'block';
+      closeBtn.onclick = () => stHideDiag();
+    }
+    el.style.display = 'flex';
+  } catch (e) {
+    return false;
+  }
+  return true;
+}
+
+function stHideDiag() {
+  try { if (stDiagEl) stDiagEl.style.display = 'none'; } catch (e) { /* 忽略 */ }
+}
+
 // ★ 兼容性：Blob.arrayBuffer() / Blob.text() 同样是 Chromium 76+ 才有。
 //   老 WebView 上直接调用会抛 "file.arrayBuffer is not a function"，
 //   真机表现就是「文件能选中，但导入没有任何反应」。这里统一走 FileReader（全版本都有），
-//   与项目里其它导入（头像 / 备份 / 阅读器）保持一致。
-function stReadFileAsArrayBuffer(file) {
+//   这里统一走 FileReader（全版本都有），与项目里其它导入（头像 / 备份 / 阅读器）保持一致。
+//   fileIndex 用于「WebView 读不到 → 交给安卓壳层读」的兜底。
+function stReadFileViaReader(file) {
   return new Promise((resolve, reject) => {
-    const viaReader = () => {
-      try {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(reader.error || new Error('文件读取失败'));
-        reader.onabort = () => reject(new Error('文件读取被中断'));
-        reader.readAsArrayBuffer(file);
-      } catch (e) {
-        reject(e);
-      }
-    };
-    if (file && typeof file.arrayBuffer === 'function') {
-      let p;
-      try { p = file.arrayBuffer(); } catch (e) { viaReader(); return; }
-      Promise.resolve(p).then(resolve, (err) => {
-        console.warn('file.arrayBuffer() 失败，回退 FileReader:', err);
-        viaReader();
-      });
-      return;
+    try {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => {
+        const e = reader.error;
+        reject(new Error((e && e.message) ? e.message : '文件读取失败'));
+      };
+      reader.onabort = () => reject(new Error('文件读取被中断'));
+      reader.readAsArrayBuffer(file);
+    } catch (e) {
+      reject(e);
     }
-    viaReader();
   });
+}
+
+async function stReadFileAsArrayBuffer(file, fileIndex) {
+  try {
+    // 关键：包一层超时。老 WebView 读 content:// 时可能永远不回调，不能死等
+    const bytes = await stWithTimeout(stReadFileViaReader(file), ST_READ_TIMEOUT_MS, '读取文件');
+    const len = (bytes && (bytes.byteLength || bytes.length)) || 0;
+    if (!len) throw new Error('文件是空的（0 字节）');
+    stDiag('FileReader 读取完成', len + ' 字节');
+    return bytes;
+  } catch (err) {
+    const reason = (err && err.message) || String(err);
+    stDiag('FileReader 读取失败', reason);
+    // 兜底：让安卓壳层用 ContentResolver 直接读（绕过 WebView 对 content:// 的限制）
+    if (typeof fileIndex === 'number' && stNativeBridge()) {
+      const bytes = stReadPickedFileViaNative(fileIndex);
+      stDiag('安卓壳层兜底读取成功', bytes.byteLength + ' 字节');
+      return bytes;
+    }
+    throw err;
+  }
 }
 
 // 字节 → UTF-8 文本（兼容没有 TextDecoder 的极老 WebView）
@@ -1469,15 +1665,17 @@ async function stBuildImportDraft(files) {
   const cards = [];
   const orphanBooks = []; // 单独附带的世界书文件，归到第一张卡
 
-  for (const file of files) {
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    const file = files[fileIndex];
     const name = String((file && file.name) || '未命名文件');
     const lower = name.toLowerCase();
     const type = String((file && file.type) || '');
+    stDiag('准备读取文件', `${name} · ${(file && file.size) || 0} 字节 · type=${type || '空'}`);
 
     // 先按字节读入（统一走 FileReader，兼容老 WebView），后面按文件头判断真实类型
     let bytes;
     try {
-      bytes = await stReadFileAsArrayBuffer(file);
+      bytes = await stReadFileAsArrayBuffer(file, fileIndex);
     } catch (e) {
       throw new Error(`「${name}」读取失败：${(e && e.message) || '文件无法读取'}`);
     }
@@ -1488,7 +1686,8 @@ async function stBuildImportDraft(files) {
     let raw = null;
 
     if (isPng) {
-      raw = await stExtractFromPng(bytes);
+      // 解压/解析也加超时：动态 Huffman 数据异常时不能把页面卡死
+      raw = await stWithTimeout(stExtractFromPng(bytes), ST_PARSE_TIMEOUT_MS, '解析 PNG');
       if (!raw) throw new Error(`「${name}」里没有角色卡数据，可能不是 SillyTavern 导出的 PNG`);
     } else if (isWebp) {
       throw new Error(`暂不支持 WebP 角色卡，「${name}」请在 SillyTavern 里导出为 PNG`);
@@ -1503,16 +1702,25 @@ async function stBuildImportDraft(files) {
         .map((e, i) => stMapWorldEntry(e, i))
         .filter(e => e.content);
 
+      // 头像压缩：直接用已读到的字节构造 Blob，避免再让 WebView 读一次文件（老机型最容易挂）
       let avatarBlob = null;
-      if (isPng) {
-        try { avatarBlob = await compressImageBlob(file, 160, 0.85); } catch (e) { avatarBlob = null; }
+      if (isPng && typeof Blob === 'function') {
+        try {
+          const src = new Blob([bytes], { type: 'image/png' });
+          avatarBlob = await stWithTimeout(compressImageBlob(src, 160, 0.85), ST_AVATAR_TIMEOUT_MS, '头像压缩');
+        } catch (e) {
+          stDiag('头像压缩跳过', (e && e.message) || String(e));
+          avatarBlob = null;
+        }
       }
+      stDiag('识别到角色卡', `${card.name} · 世界书 ${mapped.length} 条`);
       cards.push({ file, card, entries: mapped, avatarBlob });
     } else if (kind === 'lorebook') {
       const mapped = stFlattenLorebook(raw)
         .map((e, i) => stMapWorldEntry(e, i))
         .filter(e => e.content);
       orphanBooks.push(...mapped);
+      stDiag('识别到独立世界书', `${mapped.length} 条`);
     } else {
       throw new Error(`「${name}」不是可识别的 SillyTavern 角色卡或世界书`);
     }
@@ -1742,41 +1950,108 @@ function initSillyTavernImport() {
   });
 
   // 统一的失败反馈：Toast 不一定存在（不同壳层），兜底用 alert，绝不静默失败
-  const stNotifyError = (msg) => {
-    if (typeof showToast === 'function') showToast(msg);
-    else if (typeof alert === 'function') alert(msg);
+  const stNotify = (msg) => {
+    try { if (typeof showToast === 'function') { showToast(msg); return; } } catch (e) { /* 继续兜底 */ }
+    try { if (typeof alert === 'function') { alert(msg); return; } } catch (e) { /* 继续兜底 */ }
+    stShowDiag({ title: msg, detail: '', closable: true });
   };
 
+  // —— 选文件看门狗 ——
+  // 安卓壳层若没把选中的文件交回网页，change 事件永远不会触发，旧版表现就是「完全没有反应」。
+  // 这里在「页面重新可见 / 获得焦点」后开始计时，超时仍未收到文件就明说。
+  let pickHandled = true;
+  let pickTimer = 0;
+
+  const openPicker = () => {
+    pickHandled = false;
+    stDiag('点击导入按钮 → 打开文件选择器');
+    try { input.value = ''; } catch (e) { /* 忽略 */ }
+    armPickWatchdog(90000); // 极端情况：用户在选择器里挑很久
+    try {
+      input.click();
+    } catch (e) {
+      pickHandled = true;
+      clearTimeout(pickTimer);
+      stNotify('无法打开文件选择器：' + ((e && e.message) || e));
+    }
+  };
+
+  function armPickWatchdog(ms) {
+    clearTimeout(pickTimer);
+    pickTimer = setTimeout(() => {
+      if (pickHandled) return;
+      stDiag('看门狗触发：文件没有回传到网页');
+      stShowDiag({
+        title: '没有收到文件',
+        detail: '系统文件选择器已经关闭，但安卓壳层没有把文件交回网页。\n\n' +
+                '点「重试」可以再选一次；如果反复如此，建议更新系统的「Android System WebView」。\n\n' +
+                '—— 环境 ——\n' + stEnvInfo(),
+        closable: true,
+        onRetry: openPicker
+      });
+    }, ms);
+  }
+
+  btn.addEventListener('click', openPicker);
+
+  const probeAfterReturn = () => {
+    if (pickHandled) return;
+    armPickWatchdog(6000);
+  };
+  try { window.addEventListener('focus', probeAfterReturn); } catch (e) { /* 忽略 */ }
+  try {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) probeAfterReturn();
+    });
+  } catch (e) { /* 忽略 */ }
+
   input.addEventListener('change', async () => {
+    pickHandled = true;
+    clearTimeout(pickTimer);
     const files = Array.from(input.files || []);
+    stDiag('change 事件触发', '文件数=' + files.length);
     if (!files.length) {
       // 安卓壳偶发「选完文件却没回传」的情况，给一次明确提示，而不是毫无反应
-      stNotifyError('没有读取到所选文件，请再选一次');
-      input.value = '';
+      stDiag('文件列表为空');
+      stNotify('没有读取到所选文件，请再选一次');
+      try { input.value = ''; } catch (e) { /* 忽略 */ }
       return;
     }
+    const fileLines = files.map((f) => `${f.name || '未命名'}（${f.size || 0} 字节，type=${f.type || '空'}）`).join('\n');
+    stShowDiag({
+      title: '正在解析角色卡…',
+      detail: fileLines + '\n\n解析完成后会自动进入预览。',
+      closable: false
+    });
     try {
-      stNotifyError('正在解析角色卡…');
-      stImportDraft = await stBuildImportDraft(files);
+      stImportDraft = await stWithTimeout(stBuildImportDraft(files), 60000, '解析角色卡');
       if (!stImportDraft.allEntries) {
         // 没有世界书也要能导入角色本体，此处仅提示
-        console.log('该角色卡未内嵌世界书');
+        stDiag('该角色卡未内嵌世界书');
       }
       const overlay = document.getElementById('st-import-overlay');
       if (!overlay) throw new Error('预览弹层缺失，请更新到最新版本');
+      stHideDiag();
       overlay.classList.add('active');
       const groupInput = document.getElementById('st-import-group');
       if (groupInput) groupInput.value = stImportDraft.defaultGroup;
       const constantCb = document.getElementById('st-import-constant-group');
       if (constantCb) constantCb.checked = false;
       stRenderImportPreview();
+      stDiag('预览已打开');
     } catch (err) {
       stImportDraft = null;
-      console.error('解析角色卡失败:', err);
+      try { console.error('解析角色卡失败:', err); } catch (e) { /* 忽略 */ }
       const detail = (err && err.message) ? err.message : String(err || '未知错误');
-      stNotifyError('解析失败：' + detail);
+      stDiag('解析失败', detail);
+      stShowDiag({
+        title: '角色卡导入失败',
+        detail: detail + '\n\n—— 诊断记录 ——\n' + stDiagLog.join('\n') + '\n\n—— 环境 ——\n' + stEnvInfo(),
+        closable: true,
+        onRetry: openPicker
+      });
     } finally {
-      input.value = '';
+      try { input.value = ''; } catch (e) { /* 忽略 */ }
     }
   });
 

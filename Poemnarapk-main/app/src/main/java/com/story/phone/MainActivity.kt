@@ -17,6 +17,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.IBinder
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.GeolocationPermissions
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -48,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var androidMcp: AndroidMcp
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
     private val FILE_CHOOSER_RESULT_CODE = 101
+    private var fileChooserOpenedAt = 0L
     private val PERMISSIONS_REQUEST_CODE = 102
 
     // ===== 返回逻辑状态（手势边缘返回 / 物理返回键共用） =====
@@ -118,6 +121,14 @@ class MainActivity : AppCompatActivity() {
                 callback?.invoke(origin, true, false)
             }
 
+            // JS 的 console 日志 / 报错转发到 logcat（tag=WebViewConsole），真机排查用：
+            // adb logcat -s WebViewConsole WebViewDiag FileChooser AndroidMcp
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                if (consoleMessage == null) return false
+                Log.i("WebViewConsole", "${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})")
+                return true
+            }
+
             // 支持 HTML5 <input type="file"> 文件选择器（备份/角色卡导入等全部走这里）
             override fun onShowFileChooser(
                 webView: WebView?,
@@ -127,6 +138,7 @@ class MainActivity : AppCompatActivity() {
                 @Suppress("UNCHECKED_CAST")
                 (fileUploadCallback as? ValueCallback<Array<Uri>?>)?.onReceiveValue(null)
                 fileUploadCallback = filePathCallback
+                fileChooserOpenedAt = System.currentTimeMillis()
 
                 // 首选系统推荐 Intent；部分机型 createIntent() 返回 null，则用 ACTION_GET_CONTENT 兜底
                 var intent = fileChooserParams?.createIntent()
@@ -154,6 +166,7 @@ class MainActivity : AppCompatActivity() {
                         true
                     } catch (e2: Exception) {
                         fileUploadCallback = null
+                        fileChooserOpenedAt = 0L
                         Toast.makeText(this@MainActivity, "当前设备没有可用的文件选择器", Toast.LENGTH_SHORT).show()
                         false
                     }
@@ -216,10 +229,16 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == FILE_CHOOSER_RESULT_CODE) {
             if (fileUploadCallback == null) return
             val results = WebChromeClient.FileChooserParams.parseResult(resultCode, data)
-            
+            Log.i("FileChooser", "onActivityResult resultCode=$resultCode, uri=${results?.size ?: 0} 个")
+            // 先记住原始 URI：JS 若读不到文件，可调用 AndroidMCP 兜底直接读字节
+            try { androidMcp.rememberPickedUris((results ?: emptyArray()).toList()) } catch (e: Exception) {
+                Log.e("FileChooser", "rememberPickedUris 失败: ${e.message}", e)
+            }
+
             @Suppress("UNCHECKED_CAST")
             (fileUploadCallback as? ValueCallback<Array<Uri>?>)?.onReceiveValue(results)
             fileUploadCallback = null
+            fileChooserOpenedAt = 0L
         }
     }
 
@@ -419,6 +438,19 @@ class MainActivity : AppCompatActivity() {
         applyImmersiveMode()
         // 从后台 / 其它应用回来时，ROM 可能留下过期的 IME 留白，这里顺手抹平
         if (!imeWasVisible) clearWebViewImeMargin()
+
+        // 兜底：文件选择器若被系统回收/结果没回传，WebView 会一直占着回调，
+        // 之后再点任何 input[type=file] 都没有反应。回到前台 3 秒仍未回传就主动解除。
+        webView.postDelayed({
+            if (fileUploadCallback != null) {
+                Log.w("FileChooser", "回调超时未回传，主动回传 null 解除占用（已等待 ${System.currentTimeMillis() - fileChooserOpenedAt} ms）")
+                @Suppress("UNCHECKED_CAST")
+                (fileUploadCallback as? ValueCallback<Array<Uri>?>)?.onReceiveValue(null)
+                fileUploadCallback = null
+                fileChooserOpenedAt = 0L
+                Toast.makeText(this, "文件选择器没有回传文件，请重试", Toast.LENGTH_SHORT).show()
+            }
+        }, 3000)
     }
 
     // 折叠屏展开 / 分屏 / 旋转等配置变化（activity 声明了 configChanges，不会重建）后，
