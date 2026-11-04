@@ -231,7 +231,7 @@ class MainActivity : AppCompatActivity() {
             val results = WebChromeClient.FileChooserParams.parseResult(resultCode, data)
             Log.i("FileChooser", "onActivityResult resultCode=$resultCode, uri=${results?.size ?: 0} 个")
             // 先记住原始 URI：JS 若读不到文件，可调用 AndroidMCP 兜底直接读字节
-            try { androidMcp.rememberPickedUris((results ?: emptyArray()).toList()) } catch (e: Exception) {
+            try { androidMcp.rememberPickedUris((results ?: emptyArray<Uri>()).toList()) } catch (e: Exception) {
                 Log.e("FileChooser", "rememberPickedUris 失败: ${e.message}", e)
             }
 
