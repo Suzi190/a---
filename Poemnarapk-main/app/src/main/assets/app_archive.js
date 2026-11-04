@@ -992,24 +992,275 @@ function stDecodeBase64Utf8(b64) {
   const bin = atob(String(b64).replace(/\s+/g, ''));
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new TextDecoder('utf-8').decode(bytes);
+  return stDecodeUtf8Text(bytes);
 }
 
 // deflate 解压（zTXt / 压缩型 iTXt 块）
+// ★ 兼容性：DecompressionStream 是 Chromium 80+ 才有的 API，安卓老机型自带的
+//   WebView（Chromium 55~79）没有它，直接调用会让「压缩文本块」的角色卡整张解析失败。
+//   这里先用原生解压，失败或不存在时回退到下面的内置纯 JS 解压器。
 async function stInflateDeflate(bytes) {
-  if (typeof DecompressionStream !== 'function') {
-    throw new Error('当前环境不支持解压 PNG 内的压缩文本块');
+  const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (typeof DecompressionStream === 'function') {
+    try {
+      const stream = new Blob([input]).stream().pipeThrough(new DecompressionStream('deflate'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch (e) {
+      console.warn('DecompressionStream 解压失败，改用内置解压器:', e);
+    }
   }
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  return stInflateZlib(input);
+}
+
+// ---------- 内置 DEFLATE 解压（RFC 1950 / 1951，老 WebView 兜底用） ----------
+const ST_INFLATE_LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+const ST_INFLATE_LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+const ST_INFLATE_DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+const ST_INFLATE_DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+const ST_INFLATE_CODE_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+
+// 由码长表构建 canonical Huffman 解码表
+function stHuffmanFromLengths(lengths) {
+  const MAX_BITS = 15;
+  const counts = new Array(MAX_BITS + 1);
+  for (let i = 0; i <= MAX_BITS; i++) counts[i] = 0;
+  for (let i = 0; i < lengths.length; i++) counts[lengths[i]]++;
+  counts[0] = 0; // 0 表示「该符号没有编码」，不参与构表
+  let left = 1;
+  for (let len = 1; len <= MAX_BITS; len++) {
+    left = (left << 1) - counts[len];
+    if (left < 0) throw new Error('角色卡压缩数据损坏（Huffman 表非法）');
+  }
+  const offs = new Array(MAX_BITS + 1);
+  offs[1] = 0;
+  for (let len = 1; len < MAX_BITS; len++) offs[len + 1] = offs[len] + counts[len];
+  const symbols = new Array(lengths.length);
+  for (let sym = 0; sym < lengths.length; sym++) {
+    const len = lengths[sym];
+    if (len) symbols[offs[len]++] = sym;
+  }
+  return { counts: counts, symbols: symbols };
+}
+
+// zlib 包裹（PNG 文本块用的格式）→ raw deflate
+function stInflateZlib(input) {
+  const data = input instanceof Uint8Array ? input : new Uint8Array(input || []);
+  let start = 0;
+  const hasZlibHeader = data.length >= 2 &&
+    (data[0] & 0x0f) === 8 &&
+    (((data[0] << 8) | data[1]) % 31) === 0;
+  if (hasZlibHeader) {
+    start = 2;
+    if (data[1] & 0x20) start += 4; // 预置字典（PNG 文本块不会出现，防御性跳过）
+  }
+  return stInflateRaw(data.subarray(start));
+}
+
+// raw deflate 解压（stored / fixed / dynamic 三种块全部支持）
+function stInflateRaw(data) {
+  let pos = 0;
+  let bitBuf = 0;
+  let bitCnt = 0;
+  let out = new Uint8Array(1 << 16);
+  let outLen = 0;
+
+  const ensureCapacity = (need) => {
+    if (outLen + need <= out.length) return;
+    let cap = out.length;
+    while (cap < outLen + need) cap <<= 1;
+    const next = new Uint8Array(cap);
+    next.set(out.subarray(0, outLen));
+    out = next;
+  };
+
+  const readBit = () => {
+    if (bitCnt === 0) {
+      if (pos >= data.length) throw new Error('角色卡压缩数据不完整');
+      bitBuf = data[pos++];
+      bitCnt = 8;
+    }
+    const b = bitBuf & 1;
+    bitBuf >>= 1;
+    bitCnt--;
+    return b;
+  };
+
+  const readBits = (n) => {
+    let v = 0;
+    for (let i = 0; i < n; i++) v |= readBit() << i;
+    return v;
+  };
+
+  const decodeSymbol = (huff) => {
+    let code = 0;
+    let first = 0;
+    let index = 0;
+    for (let len = 1; len <= 15; len++) {
+      code |= readBit();
+      const count = huff.counts[len];
+      if (code - count < first) return huff.symbols[index + (code - first)];
+      index += count;
+      first = (first + count) << 1;
+      code <<= 1;
+    }
+    throw new Error('角色卡压缩数据损坏（Huffman 解码失败）');
+  };
+
+  const decodeBlock = (litHuff, distHuff) => {
+    for (;;) {
+      const sym = decodeSymbol(litHuff);
+      if (sym < 256) {
+        ensureCapacity(1);
+        out[outLen++] = sym;
+        continue;
+      }
+      if (sym === 256) return; // 块结束
+      const li = sym - 257;
+      if (li < 0 || li >= ST_INFLATE_LEN_BASE.length) throw new Error('角色卡压缩数据损坏（长度码非法）');
+      const len = ST_INFLATE_LEN_BASE[li] + readBits(ST_INFLATE_LEN_EXTRA[li]);
+      const dsym = decodeSymbol(distHuff);
+      if (dsym < 0 || dsym >= ST_INFLATE_DIST_BASE.length) throw new Error('角色卡压缩数据损坏（距离码非法）');
+      const dist = ST_INFLATE_DIST_BASE[dsym] + readBits(ST_INFLATE_DIST_EXTRA[dsym]);
+      if (dist > outLen) throw new Error('角色卡压缩数据损坏（回溯距离越界）');
+      ensureCapacity(len);
+      for (let i = 0; i < len; i++) {
+        out[outLen] = out[outLen - dist];
+        outLen++;
+      }
+    }
+  };
+
+  let last = 0;
+  while (!last) {
+    last = readBit();
+    const type = readBits(2);
+
+    if (type === 0) {
+      // 不压缩存储块：先对齐到字节边界
+      bitCnt = 0;
+      if (pos + 4 > data.length) throw new Error('角色卡压缩数据不完整');
+      const len = data[pos] | (data[pos + 1] << 8);
+      pos += 4; // 跳过 LEN / NLEN
+      if (pos + len > data.length) throw new Error('角色卡压缩数据不完整');
+      ensureCapacity(len);
+      out.set(data.subarray(pos, pos + len), outLen);
+      outLen += len;
+      pos += len;
+    } else if (type === 1) {
+      // 固定 Huffman 表
+      const litLens = new Array(288);
+      for (let i = 0; i < 144; i++) litLens[i] = 8;
+      for (let i = 144; i < 256; i++) litLens[i] = 9;
+      for (let i = 256; i < 280; i++) litLens[i] = 7;
+      for (let i = 280; i < 288; i++) litLens[i] = 8;
+      const distLens = new Array(30);
+      for (let i = 0; i < 30; i++) distLens[i] = 5;
+      decodeBlock(stHuffmanFromLengths(litLens), stHuffmanFromLengths(distLens));
+    } else if (type === 2) {
+      // 动态 Huffman 表
+      const hlit = readBits(5) + 257;
+      const hdist = readBits(5) + 1;
+      const hclen = readBits(4) + 4;
+      const codeLens = new Array(19);
+      for (let i = 0; i < 19; i++) codeLens[i] = 0;
+      for (let i = 0; i < hclen; i++) codeLens[ST_INFLATE_CODE_ORDER[i]] = readBits(3);
+      const codeHuff = stHuffmanFromLengths(codeLens);
+
+      const lens = [];
+      while (lens.length < hlit + hdist) {
+        const sym = decodeSymbol(codeHuff);
+        if (sym < 16) {
+          lens.push(sym);
+        } else if (sym === 16) {
+          if (!lens.length) throw new Error('角色卡压缩数据损坏（长度表非法）');
+          const prev = lens[lens.length - 1];
+          const rep = 3 + readBits(2);
+          for (let i = 0; i < rep; i++) lens.push(prev);
+        } else if (sym === 17) {
+          const rep = 3 + readBits(3);
+          for (let i = 0; i < rep; i++) lens.push(0);
+        } else if (sym === 18) {
+          const rep = 11 + readBits(7);
+          for (let i = 0; i < rep; i++) lens.push(0);
+        } else {
+          throw new Error('角色卡压缩数据损坏（长度表非法）');
+        }
+      }
+      decodeBlock(
+        stHuffmanFromLengths(lens.slice(0, hlit)),
+        stHuffmanFromLengths(lens.slice(hlit, hlit + hdist))
+      );
+    } else {
+      throw new Error('角色卡压缩数据损坏（未知压缩块类型）');
+    }
+  }
+
+  return out.subarray(0, outLen);
+}
+
+// ★ 兼容性：Blob.arrayBuffer() / Blob.text() 同样是 Chromium 76+ 才有。
+//   老 WebView 上直接调用会抛 "file.arrayBuffer is not a function"，
+//   真机表现就是「文件能选中，但导入没有任何反应」。这里统一走 FileReader（全版本都有），
+//   与项目里其它导入（头像 / 备份 / 阅读器）保持一致。
+function stReadFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const viaReader = () => {
+      try {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error('文件读取失败'));
+        reader.onabort = () => reject(new Error('文件读取被中断'));
+        reader.readAsArrayBuffer(file);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    if (file && typeof file.arrayBuffer === 'function') {
+      let p;
+      try { p = file.arrayBuffer(); } catch (e) { viaReader(); return; }
+      Promise.resolve(p).then(resolve, (err) => {
+        console.warn('file.arrayBuffer() 失败，回退 FileReader:', err);
+        viaReader();
+      });
+      return;
+    }
+    viaReader();
+  });
+}
+
+// 字节 → UTF-8 文本（兼容没有 TextDecoder 的极老 WebView）
+function stDecodeUtf8Text(bytes) {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  if (typeof TextDecoder === 'function') {
+    try { return new TextDecoder('utf-8').decode(u8); } catch (e) { /* 走下面的兜底 */ }
+  }
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < u8.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+  }
+  try { return decodeURIComponent(escape(bin)); } catch (e) { return bin; }
+}
+
+// 文件头判断是否为 PNG（部分安卓文件管理器不给 File.type，也可能丢掉后缀）
+function stLooksLikePng(bytes) {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  if (u8.length < 8) return false;
+  const sig = [137, 80, 78, 71, 13, 10, 26, 10];
+  for (let i = 0; i < 8; i++) {
+    if (u8[i] !== sig[i]) return false;
+  }
+  return true;
 }
 
 // 从 PNG 数据块中提取 SillyTavern 角色卡 JSON
 async function stExtractFromPng(arrayBuffer) {
-  const bytes = new Uint8Array(arrayBuffer);
+  // 兼容 FileReader 回传的 ArrayBuffer 与直接传入的 Uint8Array
+  const bytes = arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer);
   const SIGN = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.length < 8) throw new Error('文件内容不完整，不是有效的 PNG');
   for (let i = 0; i < SIGN.length; i++) {
-    if (bytes[i] !== SIGN[i]) throw new Error('这不是有效的 PNG 文件');
+    if (bytes[i] !== SIGN[i]) throw new Error('这不是有效的 PNG 文件（SillyTavern 角色卡请导出为 PNG）');
   }
   let chara = '';
   let ccv3 = '';
@@ -1042,7 +1293,7 @@ async function stExtractFromPng(arrayBuffer) {
         p = (z3 >= 0 ? z3 : chunk.length - 1) + 1;
         let textBytes = chunk.subarray(p);
         if (compressFlag === 1) textBytes = await stInflateDeflate(textBytes);
-        const val = new TextDecoder('utf-8').decode(textBytes);
+        const val = stDecodeUtf8Text(textBytes);
         if (key === 'chara') chara = val;
         else if (key === 'ccv3') ccv3 = val;
       }
@@ -1219,15 +1470,30 @@ async function stBuildImportDraft(files) {
   const orphanBooks = []; // 单独附带的世界书文件，归到第一张卡
 
   for (const file of files) {
-    const lower = String(file.name || '').toLowerCase();
-    const isImage = lower.endsWith('.png') || lower.endsWith('.webp') || file.type === 'image/png' || file.type === 'image/webp';
+    const name = String((file && file.name) || '未命名文件');
+    const lower = name.toLowerCase();
+    const type = String((file && file.type) || '');
+
+    // 先按字节读入（统一走 FileReader，兼容老 WebView），后面按文件头判断真实类型
+    let bytes;
+    try {
+      bytes = await stReadFileAsArrayBuffer(file);
+    } catch (e) {
+      throw new Error(`「${name}」读取失败：${(e && e.message) || '文件无法读取'}`);
+    }
+    if (!bytes || !bytes.byteLength) throw new Error(`「${name}」是空文件`);
+
+    const isPng = stLooksLikePng(bytes) || lower.endsWith('.png') || type === 'image/png';
+    const isWebp = !isPng && (lower.endsWith('.webp') || type === 'image/webp');
     let raw = null;
 
-    if (isImage) {
-      raw = await stExtractFromPng(await file.arrayBuffer());
-      if (!raw) throw new Error(`「${file.name}」里没有角色卡数据，可能不是 SillyTavern 导出的 PNG`);
+    if (isPng) {
+      raw = await stExtractFromPng(bytes);
+      if (!raw) throw new Error(`「${name}」里没有角色卡数据，可能不是 SillyTavern 导出的 PNG`);
+    } else if (isWebp) {
+      throw new Error(`暂不支持 WebP 角色卡，「${name}」请在 SillyTavern 里导出为 PNG`);
     } else {
-      raw = stParseJsonLoose(await file.text());
+      raw = stParseJsonLoose(stDecodeUtf8Text(bytes));
     }
 
     const kind = stDetectPayloadKind(raw);
@@ -1238,7 +1504,7 @@ async function stBuildImportDraft(files) {
         .filter(e => e.content);
 
       let avatarBlob = null;
-      if (isImage) {
+      if (isPng) {
         try { avatarBlob = await compressImageBlob(file, 160, 0.85); } catch (e) { avatarBlob = null; }
       }
       cards.push({ file, card, entries: mapped, avatarBlob });
@@ -1248,7 +1514,7 @@ async function stBuildImportDraft(files) {
         .filter(e => e.content);
       orphanBooks.push(...mapped);
     } else {
-      throw new Error(`「${file.name}」不是可识别的 SillyTavern 角色卡或世界书`);
+      throw new Error(`「${name}」不是可识别的 SillyTavern 角色卡或世界书`);
     }
   }
 
@@ -1475,27 +1741,40 @@ function initSillyTavernImport() {
     input.click();
   });
 
+  // 统一的失败反馈：Toast 不一定存在（不同壳层），兜底用 alert，绝不静默失败
+  const stNotifyError = (msg) => {
+    if (typeof showToast === 'function') showToast(msg);
+    else if (typeof alert === 'function') alert(msg);
+  };
+
   input.addEventListener('change', async () => {
     const files = Array.from(input.files || []);
-    if (!files.length) return;
+    if (!files.length) {
+      // 安卓壳偶发「选完文件却没回传」的情况，给一次明确提示，而不是毫无反应
+      stNotifyError('没有读取到所选文件，请再选一次');
+      input.value = '';
+      return;
+    }
     try {
+      stNotifyError('正在解析角色卡…');
       stImportDraft = await stBuildImportDraft(files);
       if (!stImportDraft.allEntries) {
         // 没有世界书也要能导入角色本体，此处仅提示
         console.log('该角色卡未内嵌世界书');
       }
       const overlay = document.getElementById('st-import-overlay');
-      if (overlay) overlay.classList.add('active');
+      if (!overlay) throw new Error('预览弹层缺失，请更新到最新版本');
+      overlay.classList.add('active');
       const groupInput = document.getElementById('st-import-group');
       if (groupInput) groupInput.value = stImportDraft.defaultGroup;
       const constantCb = document.getElementById('st-import-constant-group');
       if (constantCb) constantCb.checked = false;
       stRenderImportPreview();
     } catch (err) {
+      stImportDraft = null;
       console.error('解析角色卡失败:', err);
-      if (typeof showToast === 'function') {
-        showToast('解析失败：' + ((err && err.message) ? err.message : '未知错误'));
-      }
+      const detail = (err && err.message) ? err.message : String(err || '未知错误');
+      stNotifyError('解析失败：' + detail);
     } finally {
       input.value = '';
     }

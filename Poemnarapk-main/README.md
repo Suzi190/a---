@@ -447,6 +447,49 @@ document.getElementById('phone-container').getBoundingClientRect().top;         
 
 ---
 
+### 7.8 「角色卡能选文件，但导入没反应」——WebView 版本兼容坑（1.3.5）
+
+现象：网页版（桌面 Chrome / Edge）导入 SillyTavern 角色卡一切正常，装成 APK 后在部分安卓机上「文件选择器能打开、也能选中文件，但选完什么都不发生」。
+
+原因不是解析逻辑，而是三个**新 API**只在较新的 Chromium 里才有，而安卓 8~10 老机型自带的 WebView 常年不更新：
+
+| API | 最低 Chromium | 在老 WebView 上 |
+| --- | --- | --- |
+| `Blob.prototype.arrayBuffer()` / `Blob.prototype.text()` | 76（2019） | `TypeError: file.text is not a function` |
+| `DecompressionStream('deflate')` | 80（2020） | `ReferenceError: DecompressionStream is not defined` |
+| `FileReader` / `atob` / `TextDecoder` | 极早（38 以前） | 全版本可用 ✅ |
+
+而全项目其它导入（头像、备份、阅读器、表情包、字体……）一直走 `FileReader`，所以只有角色卡导入出问题。
+
+修法（`app_archive.js`）：
+
+```js
+// 1) 读文件统一走 FileReader，file.arrayBuffer() 只当作可选快路径
+function stReadFileAsArrayBuffer(file) { /* arrayBuffer() → 失败/不存在则 readAsArrayBuffer */ }
+
+// 2) 文本用字节解码：有 TextDecoder 用它，没有就 decodeURIComponent(escape(bin))
+function stDecodeUtf8Text(bytes) { /* ... */ }
+
+// 3) 压缩文本块（zTXt / iTXt flag=1）先用 DecompressionStream，失败则用内置纯 JS DEFLATE
+async function stInflateDeflate(bytes) { /* 原生 → 失败则 stInflateZlib() */ }
+```
+
+顺带补了两处健壮性：
+
+- **PNG 文件头嗅探**：安卓文件管理器常不给 `File.type`、甚至丢后缀，现在读字节后先看 `89 50 4E 47` 魔数，能识别就直接当 PNG 解析；
+- **失败一定有反馈**：解析前先提示「正在解析角色卡…」，出错显示具体原因（含文件名），选完文件却没回传时提示「没有读取到所选文件」，不再静默失败。
+
+回归测试（不需要真机）：
+
+```bash
+node tools/st-inflate-test.mjs   # 在「无 DecompressionStream / 无 Blob.arrayBuffer」的 vm 沙箱里跑 51 项
+node tools/st-import-test.mjs    # 无头 Edge：真实 input[type=file] → 解析 → 预览 → 落库
+```
+
+> 经验：写进 `app/src/main/assets` 的前端代码，只要用到 2019 年之后新增的 Web API，就要准备降级路径或自实现兜底——桌面浏览器测不出来，老安卓 WebView 会直接白给。
+
+---
+
 ## 八、核心数据库设计（Dexie / IndexedDB）
 
 系统使用 Dexie.js 在浏览器 IndexedDB 中维护 24+ 张物理表，覆盖 API 预设、档案、关系、会话、消息、世界书、剧场、状态切片、表情包、深谈、朋友圈、HTML 卡片、悬浮桌宠、阅读书城等模块。完整定义在 [app/src/main/assets/db.js](app/src/main/assets/db.js)。
