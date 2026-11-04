@@ -1944,11 +1944,6 @@ function initSillyTavernImport() {
   if (btn.dataset.stBound === '1') return;
   btn.dataset.stBound = '1';
 
-  btn.addEventListener('click', () => {
-    input.value = '';
-    input.click();
-  });
-
   // 统一的失败反馈：Toast 不一定存在（不同壳层），兜底用 alert，绝不静默失败
   const stNotify = (msg) => {
     try { if (typeof showToast === 'function') { showToast(msg); return; } } catch (e) { /* 继续兜底 */ }
